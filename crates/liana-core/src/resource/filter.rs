@@ -54,6 +54,44 @@ pub fn filter_resource(subunits: &[LrSubunit], var_names: &[String]) -> Vec<LrSu
         .collect()
 }
 
+/// `assert_covered` (`_core/_pipe_utils/_pre.py:23`), the resource/`var_names`
+/// overlap guard `_liana_pipe.py:144` runs before filtering: at most
+/// `prop_missing_allowed = 0.98` of the resource's unique symbols — the ligand
+/// and receptor columns as given, complexes included — may be absent from the
+/// prepared `var_names`. A multi-subunit complex is one symbol, so it counts as
+/// missing; that is liana's own semantics, and why a wrong organism or ID type
+/// trips this instead of quietly scoring nothing.
+///
+/// An empty resource raises too (`subset_arr.size == 0` sets the proportion to
+/// `1.0`). The comparison is strict: exactly `0.98` passes.
+pub fn assert_covered(pairs: &[LrPair], var_names: &[String]) -> Result<()> {
+    const PROP_MISSING_ALLOWED: f64 = 0.98;
+    let symbols: HashSet<&str> = pairs
+        .iter()
+        .flat_map(|pair| [pair.ligand.as_str(), pair.receptor.as_str()])
+        .collect();
+    let vars: HashSet<&str> = var_names.iter().map(String::as_str).collect();
+    let missing = symbols
+        .iter()
+        .filter(|symbol| !vars.contains(*symbol))
+        .count();
+    let prop_missing = if symbols.is_empty() {
+        1.0
+    } else {
+        missing as f64 / symbols.len() as f64
+    };
+    if prop_missing > PROP_MISSING_ALLOWED {
+        bail!(
+            "too few features from the resource were found in the data: {missing} of {} resource \
+             symbols are missing from the {} var_names (allowed proportion \
+             {PROP_MISSING_ALLOWED}); check the resource's organism / ID type",
+            symbols.len(),
+            var_names.len(),
+        );
+    }
+    Ok(())
+}
+
 /// liana's `expr_prop`/`min_cells` filter, from the expression matrix to the
 /// ligand–receptor pairs that survive it.
 ///
@@ -254,5 +292,43 @@ mod tests {
         // ...and, as liana raises there, a threshold nothing can pass is an error
         // rather than an empty result.
         assert!(filter_lrs(&adata, &pairs, 1.5, 0).is_err());
+    }
+
+    #[test]
+    fn coverage_allows_up_to_98_percent_missing() {
+        let vars: Vec<String> = ["lig", "rec"].iter().map(|s| s.to_string()).collect();
+        assert!(assert_covered(&[pair("lig", "rec")], &vars).is_ok());
+
+        // `missing` absent symbols plus `lig`/`rec` as the present ones
+        let with_missing = |missing: usize| -> Vec<LrPair> {
+            (0..missing)
+                .map(|i| pair(&format!("gone{i}"), "rec"))
+                .chain([pair("lig", "rec")])
+                .collect()
+        };
+        // exactly 98 of 100 symbols missing is the boundary and passes — the
+        // comparison is strict — while one more trips it
+        assert!(
+            assert_covered(&with_missing(98), &vars).is_ok(),
+            "98/100 = 0.98"
+        );
+        assert!(
+            assert_covered(&with_missing(99), &vars).is_err(),
+            "99/101 > 0.98"
+        );
+
+        // a multi-subunit complex is one symbol and never a var name, so it
+        // counts as missing, as it does in liana
+        let complexes: Vec<LrPair> = (0..99)
+            .map(|i| pair(&format!("lig{i}_REC2"), "rec"))
+            .chain([pair("lig", "rec")])
+            .collect();
+        assert!(
+            assert_covered(&complexes, &vars).is_err(),
+            "99 of 101 missing"
+        );
+
+        // an empty resource is 100% missing, as liana's `subset_arr.size == 0` arm
+        assert!(assert_covered(&[], &vars).is_err());
     }
 }

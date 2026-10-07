@@ -47,9 +47,11 @@ fn main() {
     // `V.expr_prop` / `V.min_cells` of liana 2.0.0's `_core/_constants.py` — what
     // `bench/run_bench.py` leaves at their defaults on the Python side
     let rows = match method.as_str() {
-        "cellphonedb" => liana_core::pipe::run_cellphonedb(&adata, &pairs, 0.05, 5, seed, n_perms)
-            .map(|rows| rows.len()),
-        "cellchat" => liana_core::pipe::run_cellchat(&adata, &pairs, 0.05, 5, seed, n_perms)
+        "cellphonedb" => {
+            liana_core::pipe::run_cellphonedb(&adata, &pairs, 0.05, 5, seed, n_perms, 0)
+                .map(|rows| rows.len())
+        }
+        "cellchat" => liana_core::pipe::run_cellchat(&adata, &pairs, 0.05, 5, seed, n_perms, 0)
             .map(|rows| rows.len()),
         other => panic!("unknown method {other}"),
     }

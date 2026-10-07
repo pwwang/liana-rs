@@ -12,7 +12,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-pub use filter::{FilterResult, KeptPair, filter_lrs, filter_resource};
+pub use filter::{FilterResult, KeptPair, assert_covered, filter_lrs, filter_resource};
 
 /// The pinned liana resource, vendored verbatim (`data/README.md`).
 const OMNI_RESOURCE: &str = include_str!("../../data/omni_resource.csv");

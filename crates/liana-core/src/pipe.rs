@@ -326,6 +326,9 @@ fn frame(
     trimean: bool,
 ) -> Result<Frame> {
     let prep = prep::prepare(adata, min_cells)?;
+    // `_liana_pipe.py:144`'s overlap guard, before anything is filtered: a
+    // resource that does not belong to this data is an error, not 0 rows.
+    resource::assert_covered(resource, &prep.var_names)?;
 
     // cellchat's `mat_max`: the prepared matrix' maximum, the implicit zeros
     // as its floor (`np.max` of a sparse matrix), with `1.0f32 / mat_max` the
@@ -446,6 +449,7 @@ pub fn run_cellphonedb(
     min_cells: usize,
     seed: u64,
     n_perms: usize,
+    threads: usize,
 ) -> Result<Vec<LrRow>> {
     let frame = frame(adata, resource, expr_prop, min_cells, false)?;
 
@@ -468,7 +472,7 @@ pub fn run_cellphonedb(
         &truth,
         seed,
         n_perms,
-        0,
+        threads,
         Aggregation::Mean,
         |ligand, receptor| (ligand + receptor) / 2.0,
     );
@@ -485,6 +489,7 @@ pub fn run_cellchat(
     min_cells: usize,
     seed: u64,
     n_perms: usize,
+    threads: usize,
 ) -> Result<Vec<CellchatRow>> {
     let frame = frame(adata, resource, expr_prop, min_cells, true)?;
     let norm = frame.mat_max.expect("trimean frame");
@@ -512,7 +517,7 @@ pub fn run_cellchat(
         &probs,
         seed,
         n_perms,
-        0,
+        threads,
         Aggregation::Trimean { norm },
         probability,
     );
@@ -529,6 +534,7 @@ pub fn run_geometric_mean(
     min_cells: usize,
     seed: u64,
     n_perms: usize,
+    threads: usize,
 ) -> Result<Vec<LrRow>> {
     let frame = frame(adata, resource, expr_prop, min_cells, false)?;
     let magnitudes: Vec<f32> = frame
@@ -543,7 +549,7 @@ pub fn run_geometric_mean(
         &truth,
         seed,
         n_perms,
-        0,
+        threads,
         Aggregation::Mean,
         |ligand, receptor| ((ligand.ln() + receptor.ln()) / 2.0).exp(),
     );
@@ -564,6 +570,7 @@ pub fn run_connectome(
     min_cells: usize,
     _seed: u64,
     _n_perms: usize,
+    _threads: usize,
 ) -> Result<Vec<Row>> {
     let frame = frame(adata, resource, expr_prop, min_cells, false)?;
     let zscores = scale_zscores(&frame.prep);
@@ -616,6 +623,7 @@ pub fn run_logfc(
     min_cells: usize,
     _seed: u64,
     _n_perms: usize,
+    _threads: usize,
 ) -> Result<Vec<Row>> {
     let frame = frame(adata, resource, expr_prop, min_cells, false)?;
     let logfc = log2fc(&frame.prep);
@@ -665,6 +673,7 @@ pub fn run_natmi(
     min_cells: usize,
     _seed: u64,
     _n_perms: usize,
+    _threads: usize,
 ) -> Result<Vec<Row>> {
     let frame = frame(adata, resource, expr_prop, min_cells, false)?;
     let ligand_sums = mean_sums(&frame, Side::Ligand);
@@ -721,6 +730,7 @@ pub fn run_scseqcomm(
     min_cells: usize,
     _seed: u64,
     _n_perms: usize,
+    _threads: usize,
 ) -> Result<Vec<Row>> {
     let frame = frame(adata, resource, expr_prop, min_cells, false)?;
     let (cluster_means, cluster_stds) = cluster_stats(&frame.prep);
@@ -779,6 +789,7 @@ pub fn run_singlecellsignalr(
     min_cells: usize,
     _seed: u64,
     _n_perms: usize,
+    _threads: usize,
 ) -> Result<Vec<Row>> {
     let frame = frame(adata, resource, expr_prop, min_cells, false)?;
     let mat_mean = mat_mean(&frame.prep);
@@ -840,6 +851,7 @@ pub fn run_rank_aggregate(
     min_cells: usize,
     seed: u64,
     n_perms: usize,
+    threads: usize,
 ) -> Result<Vec<Row>> {
     let frame = frame(adata, resource, expr_prop, min_cells, false)?;
     let n_vars = frame.prep.n_vars();
@@ -865,7 +877,7 @@ pub fn run_rank_aggregate(
         &truth,
         seed,
         n_perms,
-        0,
+        threads,
         Aggregation::Mean,
         |ligand, receptor| (ligand + receptor) / 2.0,
     );
@@ -1439,7 +1451,7 @@ mod tests {
             ligand: "lig".into(),
             receptor: "rec".into(),
         }];
-        let rows = run_cellphonedb(&adata, &resource, 0.05, 0, 1337, 4).unwrap();
+        let rows = run_cellphonedb(&adata, &resource, 0.05, 0, 1337, 4, 0).unwrap();
         assert_eq!(rows.len(), 1);
         let row = &rows[0];
         assert_eq!(row.ligand, "lig");
@@ -1453,7 +1465,7 @@ mod tests {
         assert_eq!(row.specificity, 1.0);
 
         // the same frame through the geometric-mean scorer: gmean(2, 4)
-        let rows = run_geometric_mean(&adata, &resource, 0.05, 0, 1337, 4).unwrap();
+        let rows = run_geometric_mean(&adata, &resource, 0.05, 0, 1337, 4, 0).unwrap();
         let row = &rows[0];
         assert!((row.magnitude - (2.0f32 * 4.0).sqrt()).abs() < 1e-6);
         assert_eq!(row.specificity, 1.0);

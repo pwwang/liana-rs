@@ -124,6 +124,7 @@ fn cellchat_pipeline_matches_the_oracle_csv() {
             reference.min_cells,
             entry.seed,
             entry.n_perms,
+            0,
         )
         .unwrap();
 

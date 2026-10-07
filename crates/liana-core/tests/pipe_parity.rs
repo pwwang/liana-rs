@@ -105,6 +105,10 @@ impl Method {
 
     /// The run, as the CSV's cells per row; `seed`/`n_perms` drive the
     /// permutation-scored methods and are ignored by the non-permutation ones.
+    ///
+    /// `threads` is passed as `0` — the process default pool; the engine's
+    /// p-values are identical for any worker count (`engine.rs`'s
+    /// `streamed_pvalues_match_the_materialised_path` pins `0, 1, 2, 32`).
     fn run(
         self,
         adata: &Adata,
@@ -116,39 +120,39 @@ impl Method {
     ) -> anyhow::Result<Vec<Vec<String>>> {
         Ok(match self {
             Method::Cellphonedb => rows_of(run_cellphonedb(
-                adata, resource, expr_prop, min_cells, seed, n_perms,
+                adata, resource, expr_prop, min_cells, seed, n_perms, 0,
             )?),
             Method::GeometricMean => rows_of(run_geometric_mean(
-                adata, resource, expr_prop, min_cells, seed, n_perms,
+                adata, resource, expr_prop, min_cells, seed, n_perms, 0,
             )?),
             Method::Connectome => {
-                run_connectome(adata, resource, expr_prop, min_cells, seed, n_perms)?
+                run_connectome(adata, resource, expr_prop, min_cells, seed, n_perms, 0)?
                     .into_iter()
                     .map(|row| row.cells)
                     .collect()
             }
-            Method::Logfc => run_logfc(adata, resource, expr_prop, min_cells, seed, n_perms)?
+            Method::Logfc => run_logfc(adata, resource, expr_prop, min_cells, seed, n_perms, 0)?
                 .into_iter()
                 .map(|row| row.cells)
                 .collect(),
-            Method::Natmi => run_natmi(adata, resource, expr_prop, min_cells, seed, n_perms)?
+            Method::Natmi => run_natmi(adata, resource, expr_prop, min_cells, seed, n_perms, 0)?
                 .into_iter()
                 .map(|row| row.cells)
                 .collect(),
             Method::Scseqcomm => {
-                run_scseqcomm(adata, resource, expr_prop, min_cells, seed, n_perms)?
+                run_scseqcomm(adata, resource, expr_prop, min_cells, seed, n_perms, 0)?
                     .into_iter()
                     .map(|row| row.cells)
                     .collect()
             }
             Method::Singlecellsignalr => {
-                run_singlecellsignalr(adata, resource, expr_prop, min_cells, seed, n_perms)?
+                run_singlecellsignalr(adata, resource, expr_prop, min_cells, seed, n_perms, 0)?
                     .into_iter()
                     .map(|row| row.cells)
                     .collect()
             }
             Method::RankAggregate => {
-                run_rank_aggregate(adata, resource, expr_prop, min_cells, seed, n_perms)?
+                run_rank_aggregate(adata, resource, expr_prop, min_cells, seed, n_perms, 0)?
                     .into_iter()
                     .map(|row| row.cells)
                     .collect()
