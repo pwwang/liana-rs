@@ -99,7 +99,7 @@ def inputs():
     for n_obs in (1000, 10000, 50000, 100000):
         for name in (f"sc_{n_obs}.h5ad", f"resource_{n_obs}.csv"):
             files[name] = sha256(DATA / name)
-    files["resource_consensus_4620.csv"] = sha256(OUTDIR / "resources/resource_consensus_4620.csv")
+    files["resource_50k_lrs4620.csv"] = sha256(OUTDIR / "resources/resource_50k_lrs4620.csv")
     return files
 
 
@@ -427,7 +427,15 @@ def markdown(doc):
     a("")
 
     # ---- T5
-    a("## T5 — consensus resource (4,620 LRs), 50k × 1000")
+    a("## T5 — a 4,620-LR resource (the consensus resource's size), 50k × 1000")
+    a("")
+    a("The resource is drawn from this synthetic data's gene universe with the paper's")
+    a("own `_sample_resource` recipe — the same one that built `resource_{n_obs}.csv` —")
+    a("at the consensus resource's 4,620-pair size. The literal")
+    a("`select_resource('consensus')` symbols cannot run here: they do not exist in the")
+    a("synthetic `Gene{i}` var_names, and all three arms reject that dump (rc=101/1,")
+    a("kept in `target/bench7/miss_t5_resource/`). The law below is in")
+    a("`n_perms × n_lrs` only, so the resource's size is what this stage exercises.")
     a("")
     rows5 = [r for r in rows if r["stage"] == "t5"]
     if rows5:

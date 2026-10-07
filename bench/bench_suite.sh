@@ -129,8 +129,17 @@ py_run() {
 # --- inputs ------------------------------------------------------------------
 
 # The truncated 50k resources of the law sweep (`head(n_lrs)`, the mem_probe
-# convention) and the two 10k anchor resources; plus liana 2.0.0's own consensus
-# (4,620 LRs) dumped read-only out of the oracle venv into the repo's target/.
+# convention), the two 10k anchor resources, and t5's 4,620-LR resource.
+#
+# t5's resource is the consensus resource's *size* (liana ships 4,620 pairs)
+# drawn from this synthetic data's gene universe with the paper's own
+# `_sample_resource` recipe (`/home/pwwang/p0a/benchmark.py`), the same recipe
+# that built `resource_{n_obs}.csv`.  The literal `select_resource('consensus')`
+# symbols cannot be used here: they do not exist in the synthetic `Gene{i}`
+# var_names, and all three arms reject that dump ("2016 of 2016 resource symbols
+# are missing"; rc=101/1 -- the failed run is kept in
+# `target/bench7/miss_t5_resource/`).  The law being tested is in
+# `n_perms x n_lrs` only, so the resource's size is what this stage varies.
 prepare_resources() {
     local n n_obs
     for n_obs in 1000 10000 50000 100000; do
@@ -141,11 +150,15 @@ prepare_resources() {
         head -n $((n + 1)) "$data/resource_10000.csv" > "$out/resources/resource_10000_lrs${n}.csv"
     done
     "$venv_py" -c "
-import liana as li
-r = li.resource.select_resource('consensus')
+import sys
+sys.path.insert(0, '/home/pwwang/p0a')
+import anndata as ad
+from benchmark import _sample_resource
+adata = ad.read_h5ad('$data/sc_50000.h5ad')
+r = _sample_resource(adata, n_lrs=4620)
 assert len(r) == 4620, len(r)
-r.to_csv('$out/resources/resource_consensus_4620.csv', index=False)
-" || { say "FATAL: consensus resource dump failed"; exit 1; }
+r.to_csv('$out/resources/resource_50k_lrs4620.csv', index=False)
+" || { say "FATAL: 4620-LR resource build failed"; exit 1; }
 }
 
 # --- stages ------------------------------------------------------------------
@@ -238,24 +251,24 @@ t4() { # startup: the binary vs `python -c "import liana"` (recorded 1.78 s)
     cli_run "$tsv" "t4_firstrun_connectome_1k" connectome 1000 1000 1 "resource_1000.csv"
 }
 
-t5() { # consensus resource (4,620 LRs), 50k x 1000: the release arm's ~23 GB bet
+t5() { # 4,620-LR resource, 50k x 1000: the release arm's ~23 GB bet
     local tsv="$out/results_t5.tsv" arm
     : > "$tsv" "$out/cmds_t5.tsv"
     say "t5 free before: $(free -m | sed -n 2p)"
     for arm in rust patched release; do
-        say "t5 consensus 4620 LRs 50k p1000 $arm"
+        say "t5 4620 LRs 50k p1000 $arm"
         if [ "$arm" = rust ]; then
             rust_run "$tsv" "t5_ra_50k_p1000_lrs4620_rust" rank_aggregate \
-                50000 1000 4 resource_consensus_4620.csv
+                50000 1000 4 resource_50k_lrs4620.csv
         elif [ "$arm" = patched ]; then
             py_run "$tsv" "t5_ra_50k_p1000_lrs4620_patched" patched rank_aggregate \
-                50000 1000 4 resource_consensus_4620.csv
+                50000 1000 4 resource_50k_lrs4620.csv
         else
             # 40 GB address-space cap: a memory miss becomes a clean MemoryError
             # instead of an OOM kill on the box. The law's prediction is ~23 GB.
             ( ulimit -v $((40 * 1024 * 1024)); py_run "$tsv" \
                 "t5_ra_50k_p1000_lrs4620_release" release rank_aggregate \
-                50000 1000 4 resource_consensus_4620.csv )
+                50000 1000 4 resource_50k_lrs4620.csv )
         fi
     done
     say "t5 free after: $(free -m | sed -n 2p)"
