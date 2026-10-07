@@ -526,6 +526,7 @@ def main():
     path = REPO / "bench/results.json"
     path.write_text(json.dumps(doc, indent=2) + "\n")
     print(f"{path}: {len(rows)} measurements, {len(doc['checks'])} checks")
+    print(f"{markdown(doc)}: the human table")
 
 
 if __name__ == "__main__":
