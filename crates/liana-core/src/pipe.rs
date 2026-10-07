@@ -1,7 +1,8 @@
 //! The single-cell pipelines end to end — `_prepare_lr_stats`, `_run_method`
-//! and `_sort_by_score` for `liana.method.sc._cellphonedb`,
-//! `liana.method.sc._geometric_mean`, `liana.method.sc._cellchat` and the
-//! non-permutation `liana.method.sc._connectome`.
+//! and `_sort_by_score` for the permutation-scored
+//! `liana.method.sc._cellphonedb`, `_geometric_mean` and `_cellchat`, and the
+//! non-permutation `liana.method.sc._connectome`, `_logfc`, `_natmi`,
+//! `_scseqcomm` and `_singlecellsignalr`.
 //!
 //! Reproduces `testdata/expected/synthetic__<method>__p{100,1000}.csv` from
 //! `testdata/fixtures/synthetic.h5ad`, the toy resource, `seed=1337` and the
