@@ -36,11 +36,13 @@
 //! (and any target where numpy resolves the same kernels — a numpy build
 //! dispatching to AVX-512/SVML would call different ones).
 
+pub mod betainc;
 pub mod expf;
 pub mod logf;
 pub mod ndtr;
 pub mod pairwise;
 
+pub use betainc::betainc;
 pub use expf::expf;
 pub use logf::logf;
 pub use ndtr::ndtr;
