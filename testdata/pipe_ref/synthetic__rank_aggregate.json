@@ -1,0 +1,388 @@
+{
+  "liana_version": "2.0.0",
+  "liana_commit": "c59472ccc9de8360dbbf5016db75f8abde08dd3e",
+  "numpy_version": "2.5.3",
+  "adata": "testdata/fixtures/synthetic.h5ad",
+  "adata_sha256": "029d7de8019bf50203394f22f0d70adfa1ef890f2a752040a1766d85037a27e5",
+  "resource": "testdata/expected/synthetic__resource.csv",
+  "resource_sha256": "fb6f5272b2e07b984355faad9dc184535de54019c253c6a343231b48740f0843",
+  "groupby": "cell_type",
+  "expr_prop": 0.05,
+  "min_cells": 5,
+  "method": "rank_aggregate",
+  "aggregate_method": "rra",
+  "methods": [
+    "CellPhoneDB",
+    "Connectome",
+    "log2FC",
+    "NATMI",
+    "SingleCellSignalR"
+  ],
+  "specificity_rank": "specificity_rank",
+  "magnitude_rank": "magnitude_rank",
+  "lr_rows": {
+    "n_rows": 440
+  },
+  "n_perms": {
+    "100": {
+      "seed": 1337,
+      "n_perms": 100,
+      "columns": [
+        "source",
+        "target",
+        "ligand_complex",
+        "receptor_complex",
+        "ligand",
+        "receptor",
+        "ligand_means",
+        "receptor_means",
+        "ligand_props",
+        "receptor_props",
+        "lr_means",
+        "cellphone_pvals",
+        "expr_prod",
+        "scaled_weight",
+        "lr_logfc",
+        "spec_weight",
+        "lrscore",
+        "specificity_rank",
+        "magnitude_rank"
+      ],
+      "sha256_keys": "164f2d7f13c469d5247878e65d31d2a9ee63514fffb5e888bc048ce2c7a59912",
+      "options": {
+        "specificity_rank": {
+          "specs": {
+            "CellPhoneDB": [
+              "cellphone_pvals",
+              true
+            ],
+            "Connectome": [
+              "scaled_weight",
+              false
+            ],
+            "log2FC": [
+              "lr_logfc",
+              false
+            ],
+            "NATMI": [
+              "spec_weight",
+              false
+            ]
+          },
+          "columns": [
+            "source",
+            "target",
+            "ligand_complex",
+            "receptor_complex",
+            "ligand",
+            "receptor",
+            "ligand_means",
+            "receptor_means",
+            "ligand_props",
+            "receptor_props",
+            "lr_means",
+            "cellphone_pvals",
+            "expr_prod",
+            "scaled_weight",
+            "lr_logfc",
+            "spec_weight",
+            "lrscore"
+          ],
+          "rank_columns": [
+            "cellphone_pvals",
+            "scaled_weight",
+            "lr_logfc",
+            "spec_weight"
+          ],
+          "rmat_dtype": "float64",
+          "rmat_shape": [
+            440,
+            4
+          ],
+          "sha256_rmat_bits": "0ff0127a8d4b9272a13951620ad99a010121ed3c59b2b8ae7bc3c811c5fdb244",
+          "sha256_joined_bits": {
+            "ligand_means": "3296ac384d905ede3f4b388abf32d6e24c22b44c5569bd7a4f9f42d16b5b2445",
+            "receptor_means": "6953c46d2a89971a765083dcdf170c8b76f1f1846bfab81497ec2cd2c085247e",
+            "ligand_props": "939832267a49acae4cd7d3a2bd1bfca2019fb001890b6164f4c6ae70de1ab9c6",
+            "receptor_props": "b7e61824176238c5d6bcf0c11b96ed06ec63b79cddc164dab965415a38c03ddb",
+            "lr_means": "b5ff7da517d43dc8638768809e7bdee6539ab43cd359d2b03b6e9776f4af1fbc",
+            "cellphone_pvals": "99f710cd70727687ef17cf2ac087971215cc2c98fa08322f3b8c486209db46c7",
+            "expr_prod": "6c1e05960290b701534b39df2e9718c5a36515cdb47c65e19edad9c4b07d8a69",
+            "scaled_weight": "fb013fc6d01ac5841f26a7984ee4e974a375c526e047c0f718703adef892a726",
+            "lr_logfc": "c637ea98aee39cad316fa9c2220373bb542c75c35cd4c8aac2d6eeb450f69cec",
+            "spec_weight": "e8f7346fec2ffad776c74cb93459104d6eb0399a4e6fc038069e5cd91741d1af",
+            "lrscore": "4b3e6277db8391abd4bcf580bc02dd674efa7be055c9ed4d50b6fd95f50d7942"
+          },
+          "sha256_out_bits": "22588b6093e27596b88da696798c4fc334b2916e7caaa51b45330d7097c1fb72",
+          "first_rmat_row": [
+            175.5,
+            101.5,
+            153.5,
+            155.5
+          ],
+          "first_out": [
+            0.10170281104416501,
+            0.19874530493445383,
+            0.04059955786999466
+          ]
+        },
+        "magnitude_rank": {
+          "specs": {
+            "CellPhoneDB": [
+              "lr_means",
+              false
+            ],
+            "Connectome": [
+              "expr_prod",
+              false
+            ],
+            "NATMI": [
+              "expr_prod",
+              false
+            ],
+            "SingleCellSignalR": [
+              "lrscore",
+              false
+            ]
+          },
+          "columns": [
+            "source",
+            "target",
+            "ligand_complex",
+            "receptor_complex",
+            "ligand",
+            "receptor",
+            "ligand_means",
+            "receptor_means",
+            "ligand_props",
+            "receptor_props",
+            "lr_means",
+            "cellphone_pvals",
+            "expr_prod",
+            "scaled_weight",
+            "lr_logfc",
+            "spec_weight",
+            "lrscore",
+            "specificity_rank"
+          ],
+          "rank_columns": [
+            "lr_means",
+            "expr_prod",
+            "lrscore"
+          ],
+          "rmat_dtype": "float32",
+          "rmat_shape": [
+            440,
+            3
+          ],
+          "sha256_rmat_bits": "69267d889b58c3b8705f60209661efd20e46ae99c442cf4fa75e04344226ed60",
+          "sha256_joined_bits": {
+            "ligand_means": "3296ac384d905ede3f4b388abf32d6e24c22b44c5569bd7a4f9f42d16b5b2445",
+            "receptor_means": "6953c46d2a89971a765083dcdf170c8b76f1f1846bfab81497ec2cd2c085247e",
+            "ligand_props": "939832267a49acae4cd7d3a2bd1bfca2019fb001890b6164f4c6ae70de1ab9c6",
+            "receptor_props": "b7e61824176238c5d6bcf0c11b96ed06ec63b79cddc164dab965415a38c03ddb",
+            "lr_means": "b5ff7da517d43dc8638768809e7bdee6539ab43cd359d2b03b6e9776f4af1fbc",
+            "cellphone_pvals": "99f710cd70727687ef17cf2ac087971215cc2c98fa08322f3b8c486209db46c7",
+            "expr_prod": "6c1e05960290b701534b39df2e9718c5a36515cdb47c65e19edad9c4b07d8a69",
+            "scaled_weight": "fb013fc6d01ac5841f26a7984ee4e974a375c526e047c0f718703adef892a726",
+            "lr_logfc": "c637ea98aee39cad316fa9c2220373bb542c75c35cd4c8aac2d6eeb450f69cec",
+            "spec_weight": "e8f7346fec2ffad776c74cb93459104d6eb0399a4e6fc038069e5cd91741d1af",
+            "lrscore": "4b3e6277db8391abd4bcf580bc02dd674efa7be055c9ed4d50b6fd95f50d7942",
+            "specificity_rank": "22588b6093e27596b88da696798c4fc334b2916e7caaa51b45330d7097c1fb72"
+          },
+          "sha256_out_bits": "286ada898b63bcb4789141d5feca67317901e946336e86d227914b9a11be5026",
+          "first_rmat_row": [
+            205.5,
+            129.5,
+            129.5
+          ],
+          "first_out": [
+            0.3066762350194981,
+            1.0,
+            0.011863121447951545
+          ]
+        }
+      }
+    },
+    "1000": {
+      "seed": 1337,
+      "n_perms": 1000,
+      "columns": [
+        "source",
+        "target",
+        "ligand_complex",
+        "receptor_complex",
+        "ligand",
+        "receptor",
+        "ligand_means",
+        "receptor_means",
+        "ligand_props",
+        "receptor_props",
+        "lr_means",
+        "cellphone_pvals",
+        "expr_prod",
+        "scaled_weight",
+        "lr_logfc",
+        "spec_weight",
+        "lrscore",
+        "specificity_rank",
+        "magnitude_rank"
+      ],
+      "sha256_keys": "164f2d7f13c469d5247878e65d31d2a9ee63514fffb5e888bc048ce2c7a59912",
+      "options": {
+        "specificity_rank": {
+          "specs": {
+            "CellPhoneDB": [
+              "cellphone_pvals",
+              true
+            ],
+            "Connectome": [
+              "scaled_weight",
+              false
+            ],
+            "log2FC": [
+              "lr_logfc",
+              false
+            ],
+            "NATMI": [
+              "spec_weight",
+              false
+            ]
+          },
+          "columns": [
+            "source",
+            "target",
+            "ligand_complex",
+            "receptor_complex",
+            "ligand",
+            "receptor",
+            "ligand_means",
+            "receptor_means",
+            "ligand_props",
+            "receptor_props",
+            "lr_means",
+            "cellphone_pvals",
+            "expr_prod",
+            "scaled_weight",
+            "lr_logfc",
+            "spec_weight",
+            "lrscore"
+          ],
+          "rank_columns": [
+            "cellphone_pvals",
+            "scaled_weight",
+            "lr_logfc",
+            "spec_weight"
+          ],
+          "rmat_dtype": "float64",
+          "rmat_shape": [
+            440,
+            4
+          ],
+          "sha256_rmat_bits": "b3d3dac3664488cc39f00863686aea23520aea8a1ff21e3208aca50320a27a9f",
+          "sha256_joined_bits": {
+            "ligand_means": "3296ac384d905ede3f4b388abf32d6e24c22b44c5569bd7a4f9f42d16b5b2445",
+            "receptor_means": "6953c46d2a89971a765083dcdf170c8b76f1f1846bfab81497ec2cd2c085247e",
+            "ligand_props": "939832267a49acae4cd7d3a2bd1bfca2019fb001890b6164f4c6ae70de1ab9c6",
+            "receptor_props": "b7e61824176238c5d6bcf0c11b96ed06ec63b79cddc164dab965415a38c03ddb",
+            "lr_means": "b5ff7da517d43dc8638768809e7bdee6539ab43cd359d2b03b6e9776f4af1fbc",
+            "cellphone_pvals": "37886ddc8747f0c1e8f9a6d34d53b9b14505d210ed45c8689aec20005ab11794",
+            "expr_prod": "6c1e05960290b701534b39df2e9718c5a36515cdb47c65e19edad9c4b07d8a69",
+            "scaled_weight": "fb013fc6d01ac5841f26a7984ee4e974a375c526e047c0f718703adef892a726",
+            "lr_logfc": "c637ea98aee39cad316fa9c2220373bb542c75c35cd4c8aac2d6eeb450f69cec",
+            "spec_weight": "e8f7346fec2ffad776c74cb93459104d6eb0399a4e6fc038069e5cd91741d1af",
+            "lrscore": "4b3e6277db8391abd4bcf580bc02dd674efa7be055c9ed4d50b6fd95f50d7942"
+          },
+          "sha256_out_bits": "234e9a64571e66dd3a6ec16fa6ed7b9ba4d56ba882cef360996f03699e3703fb",
+          "first_rmat_row": [
+            166.5,
+            101.5,
+            153.5,
+            155.5
+          ],
+          "first_out": [
+            0.08239131322101721,
+            0.19874530493445383,
+            0.04059955786999466
+          ]
+        },
+        "magnitude_rank": {
+          "specs": {
+            "CellPhoneDB": [
+              "lr_means",
+              false
+            ],
+            "Connectome": [
+              "expr_prod",
+              false
+            ],
+            "NATMI": [
+              "expr_prod",
+              false
+            ],
+            "SingleCellSignalR": [
+              "lrscore",
+              false
+            ]
+          },
+          "columns": [
+            "source",
+            "target",
+            "ligand_complex",
+            "receptor_complex",
+            "ligand",
+            "receptor",
+            "ligand_means",
+            "receptor_means",
+            "ligand_props",
+            "receptor_props",
+            "lr_means",
+            "cellphone_pvals",
+            "expr_prod",
+            "scaled_weight",
+            "lr_logfc",
+            "spec_weight",
+            "lrscore",
+            "specificity_rank"
+          ],
+          "rank_columns": [
+            "lr_means",
+            "expr_prod",
+            "lrscore"
+          ],
+          "rmat_dtype": "float32",
+          "rmat_shape": [
+            440,
+            3
+          ],
+          "sha256_rmat_bits": "69267d889b58c3b8705f60209661efd20e46ae99c442cf4fa75e04344226ed60",
+          "sha256_joined_bits": {
+            "ligand_means": "3296ac384d905ede3f4b388abf32d6e24c22b44c5569bd7a4f9f42d16b5b2445",
+            "receptor_means": "6953c46d2a89971a765083dcdf170c8b76f1f1846bfab81497ec2cd2c085247e",
+            "ligand_props": "939832267a49acae4cd7d3a2bd1bfca2019fb001890b6164f4c6ae70de1ab9c6",
+            "receptor_props": "b7e61824176238c5d6bcf0c11b96ed06ec63b79cddc164dab965415a38c03ddb",
+            "lr_means": "b5ff7da517d43dc8638768809e7bdee6539ab43cd359d2b03b6e9776f4af1fbc",
+            "cellphone_pvals": "37886ddc8747f0c1e8f9a6d34d53b9b14505d210ed45c8689aec20005ab11794",
+            "expr_prod": "6c1e05960290b701534b39df2e9718c5a36515cdb47c65e19edad9c4b07d8a69",
+            "scaled_weight": "fb013fc6d01ac5841f26a7984ee4e974a375c526e047c0f718703adef892a726",
+            "lr_logfc": "c637ea98aee39cad316fa9c2220373bb542c75c35cd4c8aac2d6eeb450f69cec",
+            "spec_weight": "e8f7346fec2ffad776c74cb93459104d6eb0399a4e6fc038069e5cd91741d1af",
+            "lrscore": "4b3e6277db8391abd4bcf580bc02dd674efa7be055c9ed4d50b6fd95f50d7942",
+            "specificity_rank": "234e9a64571e66dd3a6ec16fa6ed7b9ba4d56ba882cef360996f03699e3703fb"
+          },
+          "sha256_out_bits": "286ada898b63bcb4789141d5feca67317901e946336e86d227914b9a11be5026",
+          "first_rmat_row": [
+            205.5,
+            129.5,
+            129.5
+          ],
+          "first_out": [
+            0.3066762350194981,
+            1.0,
+            0.011863121447951545
+          ]
+        }
+      }
+    }
+  }
+}

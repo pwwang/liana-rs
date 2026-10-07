@@ -1,0 +1,10 @@
+[package]
+name = "engine-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+liana-core = { path = "../../crates/liana-core" }
+rayon.workspace = true

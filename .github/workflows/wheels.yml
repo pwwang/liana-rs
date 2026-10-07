@@ -1,0 +1,42 @@
+name: wheels
+
+# Wheels for the `liana_rs` Python module (crates/liana-py). The local
+# equivalent is in the README's "Python module" section:
+#
+#   uv venv target/py-venv && uv pip install --python target/py-venv/bin/python maturin
+#   VIRTUAL_ENV=$PWD/target/py-venv target/py-venv/bin/maturin build --release -m crates/liana-py/Cargo.toml
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  wheels:
+    name: wheel (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing must not cancel the others.
+      fail-fast: false
+    # Windows is best-effort: the bundled-HDF5 static build may not link under
+    # MSVC yet.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    matrix:
+      include:
+        - { os: ubuntu-latest, target: x86_64 }
+        - { os: macos-latest, target: aarch64-apple-darwin }
+        - { os: windows-latest, target: x64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: crates/liana-py
+          target: ${{ matrix.target }}
+          manylinux: auto
+          args: --release --out dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: crates/liana-py/dist/*.whl

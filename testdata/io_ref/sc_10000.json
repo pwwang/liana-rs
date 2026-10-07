@@ -1,0 +1,54 @@
+{
+  "name": "sc_10000",
+  "file": "/home/pwwang/p0a/data/sc_10000.h5ad",
+  "sha256_file": "f5a41869baf20fb5c7b9835bb0473268e3e0fe3c419f52817fc16c861297557d",
+  "hash_format": {
+    "names": "one name per line, \"\\n\"-terminated, UTF-8",
+    "var_sums": "float32 sums formatted \"{sum:.6f}\", one per line in var_names order",
+    "labels": "the label *name* of each cell, one per line, cell order"
+  },
+  "n_obs": 10000,
+  "n_vars": 2000,
+  "x_encoding": "csr_matrix",
+  "x_raw_dtype": "float32",
+  "x_f32_nnz": 1998938,
+  "x_f32_sum_sequential": 7884420.5,
+  "x_f32_sum_scipy": 7846458.5,
+  "var_sums_sha256": "4302d41cc0c6f01007792dc3f2a9652f74628d58d013c541a769b4b065effa67",
+  "label_key": "cell_type",
+  "label_names": [
+    "CT0",
+    "CT1",
+    "CT2",
+    "CT3",
+    "CT4",
+    "CT5",
+    "CT6",
+    "CT7",
+    "CT8",
+    "CT9"
+  ],
+  "label_counts": {
+    "CT0": 1015,
+    "CT1": 1003,
+    "CT2": 1040,
+    "CT3": 1015,
+    "CT4": 1007,
+    "CT5": 989,
+    "CT6": 1004,
+    "CT7": 961,
+    "CT8": 995,
+    "CT9": 971
+  },
+  "labels_sha256": "6853ea98282c0d0ce58e2ca6c45abfdb8b7340b0caa5114e8c5b1d76b4e4bddc",
+  "var_names_sha256": "914debb4455a3175dc330ae515c11d248c905f5e97cf92aa782385dee44baa12",
+  "obs_names_sha256": "e367ba86c87387b5c6bb3aa20c006748dcb9359ef74f16e29d7b64b56e08ddde",
+  "obsm_spatial": {
+    "n_cols": 2,
+    "dtype": "int64",
+    "first": [
+      3927,
+      2035
+    ]
+  }
+}

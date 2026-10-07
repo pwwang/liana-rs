@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = ["crates/liana-core", "crates/liana-cli", "crates/liana-py", "bench/engine_bench"]
+
+[workspace.package]
+edition = "2024"
+license = "BSD-3-Clause"
+version = "0.1.0"
+
+[workspace.dependencies]
+rayon = "1.12"
+statrs = "0.19"
+rand = "0.10"
+rand_pcg = "0.10"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+# `float_roundtrip`: exact (correctly-rounded) float parsing — the default fast
+# path can land 1 ulp away, which a bit-parity test cannot tolerate.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+sha2 = "0.10"
+anndata = "0.7"
+anndata-hdf5 = "0.5"
+# `static` builds the bundled HDF5 C library (needs cmake + a C compiler); it is
+# the same feature set `anndata-hdf5` requests, so both unify on one build.
+# `zlib` compiles deflate in: real-world `.h5ad` files are gzip-chunked, and
+# without it HDF5 tries to load the filter as a plugin and fails.
+hdf5-metno = { version = "0.12", features = ["static", "zlib"] }
+polars = "0.53"
+ndarray = "0.17"

@@ -1,0 +1,13 @@
+[package]
+name = "liana-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+liana-core = { path = "../liana-core" }
+pyo3 = { version = "0.29", features = ["extension-module"] }

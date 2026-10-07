@@ -1,0 +1,38 @@
+{
+  "name": "synthetic",
+  "file": "testdata/fixtures/synthetic.h5ad",
+  "sha256_file": "029d7de8019bf50203394f22f0d70adfa1ef890f2a752040a1766d85037a27e5",
+  "hash_format": {
+    "names": "one name per line, \"\\n\"-terminated, UTF-8",
+    "var_sums": "float32 sums formatted \"{sum:.6f}\", one per line in var_names order",
+    "labels": "the label *name* of each cell, one per line, cell order"
+  },
+  "n_obs": 4205,
+  "n_vars": 11,
+  "x_encoding": "dense",
+  "x_raw_dtype": "float64",
+  "x_f32_nnz": 31069,
+  "x_f32_sum_sequential": 10703.8779296875,
+  "x_f32_sum_scipy": 10703.865234375,
+  "var_sums_sha256": "a69b93e9810c30a47eb1a7b909886f49cf97e1ed482fffe7f3393daf2eece8c3",
+  "label_key": "cell_type",
+  "label_names": [
+    "A",
+    "B"
+  ],
+  "label_counts": {
+    "A": 2088,
+    "B": 2117
+  },
+  "labels_sha256": "897a90e76253305446badfdd7aa13eb6635f71cd16b0bea28540bde33969c3fa",
+  "var_names_sha256": "eb787ad3e5e5925b5daeb3f7763d027e0175147ffcb1f8c2a25a8fbf9d0d9978",
+  "obs_names_sha256": "0fdd32c6de7e0e2159845ef1ea3fc9a990ad6760b914a610a7495df0940c67be",
+  "obsm_spatial": {
+    "n_cols": 2,
+    "dtype": "int64",
+    "first": [
+      1,
+      100
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+[package]
+name = "liana-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rayon.workspace = true
+statrs.workspace = true
+rand.workspace = true
+rand_pcg.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hdf5-metno.workspace = true
+anndata = { workspace = true, optional = true }
+anndata-hdf5 = { workspace = true, optional = true }
+polars = { workspace = true, optional = true }
+ndarray = { workspace = true, optional = true }
+
+[dev-dependencies]
+sha2.workspace = true
+
+[features]
+# The W2-T1 coverage spike (`examples/io_spike.rs`) — anndata-rs + polars, which
+# the library itself does not use. Off by default so CI never builds them.
+io-spike = ["dep:anndata", "dep:anndata-hdf5", "dep:polars", "dep:ndarray"]
+
+[[example]]
+name = "io_spike"
+required-features = ["io-spike"]

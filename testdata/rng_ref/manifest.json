@@ -1,0 +1,140 @@
+{
+  "entries": [
+    {
+      "data_sha256": "7ea4349cdb1c5025da338e9a92fae702962d4d55bef16f9d8227bf3beaf61e91",
+      "dtype": "<u2",
+      "n_obs": 1000,
+      "n_perms": 100,
+      "npy": "rng_seed0_nobs1000_nperms100.npy",
+      "npy_sha256": "b51b816fa0b82bd8934f4be81cc2b0a6d45f110234fd6e61b31d90b8b8e8abe1",
+      "seed": 0,
+      "shape": [
+        100,
+        1000
+      ]
+    },
+    {
+      "data_sha256": "6f48837297fc462957db5bd53d60d2c49917227db931432aecd5c409e3c9581d",
+      "dtype": "<u2",
+      "n_obs": 10000,
+      "n_perms": 100,
+      "npy": "rng_seed0_nobs10000_nperms100.npy",
+      "npy_sha256": "22ae96dd2b776f6cb8a7929dbfdd8861f3e0bf91b718afdea78845b08522a2fa",
+      "seed": 0,
+      "shape": [
+        100,
+        10000
+      ]
+    },
+    {
+      "data_sha256": "e6070ce3d6a759d452e4723d3f7b350548afd4559a7e2e04f8825dedf97762fd",
+      "dtype": "<u2",
+      "n_obs": 50000,
+      "n_perms": 100,
+      "npy": "rng_seed0_nobs50000_nperms100.npy",
+      "npy_sha256": "56d28688ab821eaefd6564590d80d3a429bb641d758dc70808da4d040297ea07",
+      "seed": 0,
+      "shape": [
+        100,
+        50000
+      ]
+    },
+    {
+      "data_sha256": "c44b2cb429dba9e8d23b97bacb0bb0c386a733cfa5c8fbb8febf1e5dfa5e7aab",
+      "dtype": "<u2",
+      "n_obs": 1000,
+      "n_perms": 100,
+      "npy": "rng_seed1_nobs1000_nperms100.npy",
+      "npy_sha256": "6d0744236462ada9099b620fb2f4209d4b36054e3ad00db3da05dcd61c3134a5",
+      "seed": 1,
+      "shape": [
+        100,
+        1000
+      ]
+    },
+    {
+      "data_sha256": "a7d5b38f8b46176e4801244f3021a94121bf2f9fb9422a2425cf33bbac4ea520",
+      "dtype": "<u2",
+      "n_obs": 10000,
+      "n_perms": 100,
+      "npy": "rng_seed1_nobs10000_nperms100.npy",
+      "npy_sha256": "581a7b7b976cb6f1de70b9f0da703f6136ba775fcb0bcf6facac4f4e152a2c32",
+      "seed": 1,
+      "shape": [
+        100,
+        10000
+      ]
+    },
+    {
+      "data_sha256": "e0c9894dd3c3f2e14c4c679d4431111c68a9c58e20d6579c6be91ca59557c1f4",
+      "dtype": "<u2",
+      "n_obs": 50000,
+      "n_perms": 100,
+      "npy": "rng_seed1_nobs50000_nperms100.npy",
+      "npy_sha256": "7e219348ca4ea9a436ac669d53b3a6e2ddd14facae33cbf5a01ffabf27fd91f9",
+      "seed": 1,
+      "shape": [
+        100,
+        50000
+      ]
+    },
+    {
+      "data_sha256": "d7073e9ff251241eb6aceb27c00b3a41e02b7fd5716894b31d467d0cbd8e6515",
+      "dtype": "<u2",
+      "n_obs": 1000,
+      "n_perms": 100,
+      "npy": "rng_seed1337_nobs1000_nperms100.npy",
+      "npy_sha256": "81efbf6daee1c6a707a9b4f4eaeb3de9f2043d6958f187a580377a01ae68e9a3",
+      "seed": 1337,
+      "shape": [
+        100,
+        1000
+      ]
+    },
+    {
+      "data_sha256": "94f74d2b2ef604293ef8a0e02e425e504c3d645e6e99c9bb670d72b7136d3436",
+      "dtype": "<u2",
+      "n_obs": 10000,
+      "n_perms": 100,
+      "npy": "rng_seed1337_nobs10000_nperms100.npy",
+      "npy_sha256": "e55c541eafb618fd331c38ad07eda6d53693a0089fded8abfb4320f0deeed8c9",
+      "seed": 1337,
+      "shape": [
+        100,
+        10000
+      ]
+    },
+    {
+      "data_sha256": "7f783521df3141bb4a5710b744c20056725a4573dfe2ace17b99be272ac6951e",
+      "dtype": "<u2",
+      "n_obs": 50000,
+      "n_perms": 100,
+      "npy": "rng_seed1337_nobs50000_nperms100.npy",
+      "npy_sha256": "f4a98f3c9fde17a0d2018c64317ded8d3313329195f5bb0d0d9fcf74588e1cb0",
+      "seed": 1337,
+      "shape": [
+        100,
+        50000
+      ]
+    },
+    {
+      "data_sha256": "9f71f28e9d2f898875ba3772cb7b96b5d679fac54a7ae0cdd025bd0f413bab23",
+      "dtype": "<u2",
+      "n_obs": 50000,
+      "n_perms": 1000,
+      "npy": "rng_seed1337_nobs50000_nperms1000.npy",
+      "npy_sha256": "40cd1712f5e18819256cf1041b4abcbfd5fbb9b228589ab9a6228f74e4a46dba",
+      "seed": 1337,
+      "shape": [
+        1000,
+        50000
+      ]
+    }
+  ],
+  "generated_by": "scripts/dump_rng_ref.py",
+  "generator": "np.random.default_rng(seed) through liana._core._pipe_utils._chunk_permutations",
+  "liana_commit": "c59472ccc9de8360dbbf5016db75f8abde08dd3e",
+  "liana_version": "2.0.0",
+  "numpy_version": "2.5.3",
+  "python_version": "3.12.13"
+}
