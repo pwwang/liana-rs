@@ -42,6 +42,11 @@ pub const CONNECTOME_CSV_HEADER: &str = "ligand,ligand_complex,ligand_means,liga
                                         receptor,receptor_complex,receptor_means,receptor_props,\
                                         receptor_zscores,source,target,expr_prod,scaled_weight";
 
+/// The oracle CSV header of [`run_logfc`]'s rows.
+pub const LOGFC_CSV_HEADER: &str = "ligand,ligand_complex,ligand_logfc,ligand_means,ligand_props,\
+                                   receptor,receptor_complex,receptor_logfc,receptor_means,\
+                                   receptor_props,source,target,lr_logfc";
+
 /// One row of a non-permutation method's output: every cell as the oracle CSV
 /// writes it, in the oracle's column order — the frame's columns as
 /// `np.union1d` alphabetizes them, then the method's score columns, appended by
@@ -568,6 +573,104 @@ pub fn run_connectome(
     scored
         .sort_by(|(left, _), (right, _)| right.partial_cmp(left).expect("expr_prod is never NaN"));
     Ok(scored.into_iter().map(|(_, row)| row).collect())
+}
+
+/// The logfc run: `lr_logfc` = the two `*_logfc` columns' `f64` mean
+/// (`method/sc/_logfc.py:11-13`), sorted by `lr_logfc` descending — logfc has
+/// no magnitude, so `_sort_by_score` falls back to its specificity
+/// (`_liana_pipe.py:465-475`). `seed`/`n_perms` do not exist for it
+/// (`permute=False`).
+pub fn run_logfc(
+    adata: &Adata,
+    resource: &[LrPair],
+    expr_prop: f64,
+    min_cells: usize,
+    _seed: u64,
+    _n_perms: usize,
+) -> Result<Vec<Row>> {
+    let frame = frame(adata, resource, expr_prop, min_cells, false)?;
+    let logfc = log2fc(&frame.prep);
+    let n_vars = frame.prep.n_vars();
+
+    let mut scored: Vec<(f64, Row)> = Vec::with_capacity(frame.rows.len());
+    for row in &frame.rows {
+        let exploded = &frame.subunits[row.subunit];
+        let ligand = gene_index(&frame.prep, &exploded.ligand, "ligand")?;
+        let receptor = gene_index(&frame.prep, &exploded.receptor, "receptor")?;
+        let ligand_logfc = logfc[row.source * n_vars + ligand];
+        let receptor_logfc = logfc[row.target * n_vars + receptor];
+        let specificity = (ligand_logfc + receptor_logfc) / 2.0;
+        scored.push((
+            specificity,
+            Row {
+                cells: vec![
+                    exploded.ligand.clone(),
+                    exploded.ligand_complex.clone(),
+                    ligand_logfc.to_string(),
+                    row.ligand_means.to_string(),
+                    row.ligand_props.to_string(),
+                    exploded.receptor.clone(),
+                    exploded.receptor_complex.clone(),
+                    receptor_logfc.to_string(),
+                    row.receptor_means.to_string(),
+                    row.receptor_props.to_string(),
+                    frame.prep.labels[row.source].clone(),
+                    frame.prep.labels[row.target].clone(),
+                    specificity.to_string(),
+                ],
+            },
+        ));
+    }
+    scored.sort_by(|(left, _), (right, _)| right.partial_cmp(left).expect("lr_logfc is never NaN"));
+    Ok(scored.into_iter().map(|(_, row)| row).collect())
+}
+
+/// `_calc_log2fc` (`_liana_pipe.py:583-596`) per label, `labels.len() *
+/// var_names.len()` row-major: each subunit gene's subject-versus-rest log2
+/// fold change of the normcounts layer's column means.
+///
+/// The layer inverts the `log1p(base=)` transform of the prepared matrix's
+/// stored entries — `_expm1_base` (`:599-616`) with `base = V.logbase =
+/// np.exp(1)`, `np.power` in `f64`. The means are scipy's
+/// `(X * (1 / n)).sum(axis=0)`: each stored value scaled in `f64`, then summed
+/// per column in ascending row order; `+ 1` and `np.log2` are `f64` libm —
+/// bit-identical to numpy's loops over this data (checked against the oracle
+/// venv, `scripts/dump_math_ref.py`'s precedent for f32).
+fn log2fc(prep: &Prep) -> Vec<f64> {
+    let base = std::f64::consts::E;
+    let normcounts: Vec<f64> = prep
+        .x
+        .data
+        .iter()
+        .map(|&value| base.powf(f64::from(value)) - 1.0)
+        .collect();
+
+    let n_vars = prep.n_vars();
+    let mut out = vec![0.0f64; prep.n_labels() * n_vars];
+    for cluster in 0..prep.n_labels() {
+        let subject_scale = 1.0 / prep.counts[cluster] as f64;
+        let rest_scale = 1.0 / (prep.x.n_rows - prep.counts[cluster]) as f64;
+        let mut subject = vec![0.0f64; n_vars];
+        let mut rest = vec![0.0f64; n_vars];
+        for row in 0..prep.x.n_rows {
+            let range = prep.x.indptr[row]..prep.x.indptr[row + 1];
+            let is_subject = prep.cell_cluster[row] as usize == cluster;
+            let scale = if is_subject {
+                subject_scale
+            } else {
+                rest_scale
+            };
+            let means = if is_subject { &mut subject } else { &mut rest };
+            for (&gene, &value) in prep.x.indices[range.clone()].iter().zip(&normcounts[range]) {
+                means[gene as usize] += value * scale;
+            }
+        }
+        let base_index = cluster * n_vars;
+        for gene in 0..n_vars {
+            out[base_index + gene] = (subject[gene] + 1.0).log2() - (rest[gene] + 1.0).log2();
+        }
+    }
+    out
 }
 
 /// The `*_zscores` table `_get_lr` builds for connectome: `sc.pp.scale` over

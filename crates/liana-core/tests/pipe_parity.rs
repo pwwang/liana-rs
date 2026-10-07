@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 
 use liana_core::io::{Adata, read_h5ad};
 use liana_core::pipe::{
-    CONNECTOME_CSV_HEADER, CPDB_CSV_HEADER, GMEAN_CSV_HEADER, LrRow, run_cellphonedb,
-    run_connectome, run_geometric_mean,
+    CONNECTOME_CSV_HEADER, CPDB_CSV_HEADER, GMEAN_CSV_HEADER, LOGFC_CSV_HEADER, LrRow,
+    run_cellphonedb, run_connectome, run_geometric_mean, run_logfc,
 };
 use liana_core::resource::{self, LrPair};
 use serde::Deserialize;
@@ -49,6 +49,7 @@ enum Method {
     Cellphonedb,
     GeometricMean,
     Connectome,
+    Logfc,
 }
 
 impl Method {
@@ -57,6 +58,7 @@ impl Method {
             Method::Cellphonedb => "cellphonedb",
             Method::GeometricMean => "geometric_mean",
             Method::Connectome => "connectome",
+            Method::Logfc => "logfc",
         }
     }
 
@@ -67,6 +69,7 @@ impl Method {
         match self {
             Method::Cellphonedb | Method::GeometricMean => "cellphonedb",
             Method::Connectome => "connectome",
+            Method::Logfc => "logfc",
         }
     }
 
@@ -75,6 +78,7 @@ impl Method {
             Method::Cellphonedb => CPDB_CSV_HEADER,
             Method::GeometricMean => GMEAN_CSV_HEADER,
             Method::Connectome => CONNECTOME_CSV_HEADER,
+            Method::Logfc => LOGFC_CSV_HEADER,
         }
     }
 
@@ -102,6 +106,10 @@ impl Method {
                     .map(|row| row.cells)
                     .collect()
             }
+            Method::Logfc => run_logfc(adata, resource, expr_prop, min_cells, seed, n_perms)?
+                .into_iter()
+                .map(|row| row.cells)
+                .collect(),
         })
     }
 }
@@ -156,6 +164,11 @@ fn geometric_mean_pipeline_matches_the_oracle_csv() {
 #[test]
 fn connectome_pipeline_matches_the_oracle_csv() {
     run_and_compare(Method::Connectome);
+}
+
+#[test]
+fn logfc_pipeline_matches_the_oracle_csv() {
+    run_and_compare(Method::Logfc);
 }
 
 fn run_and_compare(method: Method) {
@@ -297,7 +310,8 @@ fn equal_field(column: &str, expected: &str, actual: &str) -> bool {
             expected.parse::<f32>().unwrap().to_bits() == actual.parse::<f32>().unwrap().to_bits()
         }
         "ligand_props" | "receptor_props" | "cellphone_pvals" | "gmean_pvals"
-        | "ligand_zscores" | "receptor_zscores" | "scaled_weight" => {
+        | "ligand_zscores" | "receptor_zscores" | "scaled_weight" | "ligand_logfc"
+        | "receptor_logfc" | "lr_logfc" => {
             expected.parse::<f64>().unwrap().to_bits() == actual.parse::<f64>().unwrap().to_bits()
         }
         _ => expected == actual,
