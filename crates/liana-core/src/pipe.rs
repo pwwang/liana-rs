@@ -200,6 +200,10 @@ struct StatsRow {
     ligand_props: f64,
     receptor_means: f32,
     receptor_props: f64,
+    /// NATMI's `_sum_means` columns, tagged over the *pre*-reassemble frame
+    /// before the complex reduction drops subunit rows.
+    ligand_means_sums: f32,
+    receptor_means_sums: f32,
     /// The trimean columns cellchat's `_complex_cols` reassemble in place of
     /// the means; `None` on the mean-aggregation frames, which never read
     /// them.
@@ -394,12 +398,18 @@ fn frame(
                     ligand_props: prep.prop(source, ligand),
                     receptor_means: prep.mean(target, receptor),
                     receptor_props: prep.prop(target, receptor),
+                    ligand_means_sums: 0.0,
+                    receptor_means_sums: 0.0,
                     ligand_trimean,
                     receptor_trimean,
                 });
             }
         }
     }
+
+    // `_sum_means` runs on this unfiltered frame (`_liana_pipe.py:180-185`),
+    // so tag the totals before `_filter_reassemble_complexes` narrows it.
+    tag_means_sums(&mut rows);
 
     if trimean {
         reassemble(
@@ -676,15 +686,13 @@ pub fn run_natmi(
     _threads: usize,
 ) -> Result<Vec<Row>> {
     let frame = frame(adata, resource, expr_prop, min_cells, false)?;
-    let ligand_sums = mean_sums(&frame, Side::Ligand);
-    let receptor_sums = mean_sums(&frame, Side::Receptor);
 
     let mut scored: Vec<(f32, Row)> = Vec::with_capacity(frame.rows.len());
-    for (index, row) in frame.rows.iter().enumerate() {
+    for row in frame.rows.iter() {
         let exploded = &frame.subunits[row.subunit];
         let magnitude = row.ligand_means * row.receptor_means;
-        let specificity =
-            (row.ligand_means / ligand_sums[index]) * (row.receptor_means / receptor_sums[index]);
+        let specificity = (row.ligand_means / row.ligand_means_sums)
+            * (row.receptor_means / row.receptor_means_sums);
         scored.push((
             magnitude,
             Row {
@@ -692,12 +700,12 @@ pub fn run_natmi(
                     exploded.ligand.clone(),
                     exploded.ligand_complex.clone(),
                     row.ligand_means.to_string(),
-                    ligand_sums[index].to_string(),
+                    row.ligand_means_sums.to_string(),
                     row.ligand_props.to_string(),
                     exploded.receptor.clone(),
                     exploded.receptor_complex.clone(),
                     row.receptor_means.to_string(),
-                    receptor_sums[index].to_string(),
+                    row.receptor_means_sums.to_string(),
                     row.receptor_props.to_string(),
                     frame.prep.labels[row.source].clone(),
                     frame.prep.labels[row.target].clone(),
@@ -909,14 +917,12 @@ pub fn run_rank_aggregate(
     // NATMI's `spec_weight` (`method/sc/_natmi.py:22-26`) and
     // SingleCellSignalR's `lrscore` (`method/sc/_singlecellsignalr.py:20-24`),
     // both all-`f32`.
-    let ligand_sums = mean_sums(&frame, Side::Ligand);
-    let receptor_sums = mean_sums(&frame, Side::Receptor);
     let mat_mean = mat_mean(&frame.prep);
     let mut spec_weight = vec![0.0f32; frame.rows.len()];
     let mut lrscore = vec![0.0f32; frame.rows.len()];
     for (index, row) in frame.rows.iter().enumerate() {
-        spec_weight[index] =
-            (row.ligand_means / ligand_sums[index]) * (row.receptor_means / receptor_sums[index]);
+        spec_weight[index] = (row.ligand_means / row.ligand_means_sums)
+            * (row.receptor_means / row.receptor_means_sums);
         let lr_sqrt = row.ligand_means.sqrt() * row.receptor_means.sqrt();
         lrscore[index] = lr_sqrt / (lr_sqrt + mat_mean);
     }
@@ -1173,59 +1179,37 @@ fn gene_cdf(gene_mean: f32, cluster_mean: f32, cluster_std: f32, counts: usize) 
     ndtr(f64::from(gene_mean - cluster_mean) / scale)
 }
 
-/// The side of the pair a `_sum_means` pass totals — the ligand pass groups
-/// `P.complete` minus `source`, the receptor pass minus `target`
-/// (`_liana_pipe.py:180-183`).
-#[derive(Clone, Copy)]
-enum Side {
-    Ligand,
-    Receptor,
+/// `_sum_means` (`_liana_pipe.py:570-571`): `lr_res.groupby(on)[what].sum()`
+/// joined back on `on`, so every row of a group carries the group's `f32`
+/// total. liana runs both passes on the *unfiltered* exploded frame
+/// (`:180-185`), before `_filter_reassemble_complexes` narrows it, so the
+/// totals cover the subunit rows the reduction later drops.
+///
+/// A group is one exploded subunit (`subunit` already names liana's key: the
+/// `ligand_complex`/`receptor_complex` pair and both exploded symbols) under a
+/// fixed target — the ligand pass, `P.complete` minus `source` — or a fixed
+/// source (the receptor pass); all of the other side's labels sit in it.
+fn tag_means_sums(rows: &mut [StatsRow]) {
+    let mut ligand: HashMap<(usize, usize), (f32, f32)> = HashMap::new();
+    let mut receptor: HashMap<(usize, usize), (f32, f32)> = HashMap::new();
+    for row in rows.iter() {
+        kahan(&mut ligand, (row.target, row.subunit), row.ligand_means);
+        kahan(&mut receptor, (row.source, row.subunit), row.receptor_means);
+    }
+    for row in rows.iter_mut() {
+        row.ligand_means_sums = ligand[&(row.target, row.subunit)].0;
+        row.receptor_means_sums = receptor[&(row.source, row.subunit)].0;
+    }
 }
 
-/// `_sum_means` (`_liana_pipe.py:604-606`): `lr_res.groupby(on)[what].sum()`
-/// joined back on `on`, so every row of a group carries the group's `f32`
-/// total, accumulated in the frame's row order.
-///
-/// A group is one (`ligand_complex`-pair, exploded ligand, exploded receptor)
-/// under a fixed target — the ligand pass — or source (the receptor pass); all
-/// of the other side's labels sit in it.
-fn mean_sums(frame: &Frame, side: Side) -> Vec<f32> {
-    let mut sums: HashMap<(usize, usize, String, String), f32> = HashMap::new();
-    for row in &frame.rows {
-        let exploded = &frame.subunits[row.subunit];
-        let fixed = match side {
-            Side::Ligand => row.target,
-            Side::Receptor => row.source,
-        };
-        let key = (
-            fixed,
-            row.pair,
-            exploded.ligand.clone(),
-            exploded.receptor.clone(),
-        );
-        let value = match side {
-            Side::Ligand => row.ligand_means,
-            Side::Receptor => row.receptor_means,
-        };
-        *sums.entry(key).or_insert(0.0) += value;
-    }
-    frame
-        .rows
-        .iter()
-        .map(|row| {
-            let exploded = &frame.subunits[row.subunit];
-            let fixed = match side {
-                Side::Ligand => row.target,
-                Side::Receptor => row.source,
-            };
-            sums[&(
-                fixed,
-                row.pair,
-                exploded.ligand.clone(),
-                exploded.receptor.clone(),
-            )]
-        })
-        .collect()
+/// pandas' `groupby.sum()` over a `float32` column is Kahan-compensated, in
+/// the frame's row order (`(total, compensation)`).
+fn kahan(map: &mut HashMap<(usize, usize), (f32, f32)>, key: (usize, usize), value: f32) {
+    let (total, compensation) = map.entry(key).or_insert((0.0, 0.0));
+    let y = value - *compensation;
+    let next = *total + y;
+    *compensation = (next - *total) - y;
+    *total = next;
 }
 
 /// `_calc_log2fc` (`_liana_pipe.py:583-596`) per label, `labels.len() *
@@ -1481,6 +1465,8 @@ mod tests {
             ligand_props: 1.0,
             receptor_means,
             receptor_props: 1.0,
+            ligand_means_sums: 0.0,
+            receptor_means_sums: 0.0,
             ligand_trimean: None,
             receptor_trimean: None,
         }
@@ -1518,5 +1504,37 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].subunit, 0);
         assert_eq!(rows[0].receptor_means, 5.0);
+    }
+
+    /// `_sum_means` sums each group's `f32` values the way pandas does —
+    /// Kahan-compensated, in frame order — so this group's total is
+    /// `0.2015939`, not the naive summation's `0.20159392`.
+    #[test]
+    fn means_sums_are_kahan_compensated() {
+        let values = [
+            0.0151153505f32,
+            0.017532349,
+            0.013437928,
+            0.026385676,
+            0.016282007,
+            0.039996352,
+            0.0,
+            0.07284425,
+        ];
+        let mut rows: Vec<StatsRow> = values
+            .iter()
+            .enumerate()
+            .map(|(source, &value)| {
+                let mut row = row(0, value, value);
+                row.source = source;
+                row
+            })
+            .collect();
+        tag_means_sums(&mut rows);
+        assert_eq!(rows[0].ligand_means_sums, 0.2015939);
+        assert_eq!(
+            values.iter().fold(0.0f32, |sum, &value| sum + value),
+            0.20159392
+        );
     }
 }
