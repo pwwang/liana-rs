@@ -2,6 +2,26 @@
 
 Rust reimplementation of the single-cell path of [LIANA+](https://github.com/scverse/liana), targeting bit-exact parity with liana 2.0.0 (tag `V2.0.0`, commit `c59472ccc9de8360dbbf5016db75f8abde08dd3e`) while removing its memory ceiling.
 
+## Usage
+
+One call runs one method over one `.h5ad` and writes liana's result table — the
+same engine behind all three surfaces. [docs/USAGE.md](docs/USAGE.md) has the
+verified examples, flag reference and exit codes.
+
+```bash
+liana-rs run --h5ad data.h5ad --label-key cell_type --resource consensus \
+    --method cellphonedb --n-perms 1000 --seed 1337 --threads 0 --out out.csv
+```
+
+```python
+import liana_rs; df = liana_rs.run("data.h5ad", "cell_type", "consensus", "cellphonedb")
+```
+
+```rust
+use liana_core::run::{Settings, run_file};
+let output = run_file("data.h5ad".as_ref(), "cell_type", "consensus", "cellphonedb", &Settings::default())?;
+```
+
 ## Layout
 
 - `crates/liana-core` — library: ligand–receptor scoring (cellphonedb, geometric_mean, rank_aggregate, …)
