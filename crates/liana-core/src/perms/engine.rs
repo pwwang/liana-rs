@@ -46,7 +46,7 @@ pub struct RowSel {
 /// order, `f64` sums divided by the label's cell count), so concatenating the
 /// blocks reproduces the cube exactly — `consecutive_blocks_are_the_cube`
 /// pins that against the materialised kernel.
-pub fn block_sums(prep: &Prep, perms: &[u16], nb: usize) -> Vec<f64> {
+pub fn block_sums(prep: &Prep, perms: &[u32], nb: usize) -> Vec<f64> {
     let (n_obs, n_labels, n_vars) = (prep.x.n_rows, prep.n_labels(), prep.n_vars());
     assert_eq!(perms.len(), nb * n_obs, "permutation block shape");
     let mut cube = vec![0f64; nb * n_labels * n_vars];
@@ -84,7 +84,7 @@ pub(crate) fn block_trimeans(
     prep: &Prep,
     scaled: &[f32],
     labels: &LabelIndex,
-    perms: &[u16],
+    perms: &[u32],
     nb: usize,
 ) -> Vec<f64> {
     let (n_obs, n_labels, n_vars) = (prep.x.n_rows, prep.n_labels(), prep.n_vars());

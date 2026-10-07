@@ -25,7 +25,7 @@ pub(crate) const TIE_RTOL: f64 = 1e-6;
 /// kernel's `prange` over permutations only bound memory: every permutation is
 /// an independent accumulation over one RNG stream, so the cube is a function
 /// of `seed` and `n_perms` alone.
-pub fn means_cube(prep: &Prep, perms: &[u16], n_perms: usize) -> Vec<f64> {
+pub fn means_cube(prep: &Prep, perms: &[u32], n_perms: usize) -> Vec<f64> {
     let n_obs = prep.x.n_rows;
     assert_eq!(perms.len(), n_perms * n_obs, "permutation matrix shape");
     let n_labels = prep.n_labels();

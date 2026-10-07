@@ -99,7 +99,7 @@ fn permutation_stream_matches_numpy_reference() {
 
         let produced: Vec<u8> = permutation_matrix(entry.seed, entry.n_obs, entry.n_perms)
             .iter()
-            .flat_map(|v| v.to_le_bytes())
+            .flat_map(|&v| u16::try_from(v).expect("index fits u16").to_le_bytes())
             .collect();
         if sha256_hex(&produced) != entry.data_sha256 {
             let at = produced
