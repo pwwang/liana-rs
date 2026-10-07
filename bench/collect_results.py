@@ -174,11 +174,13 @@ def checks(rows):
             "arms": dict(arms), "pass": len(counts) == 1,
         })
     rust = [r for r in rows if r["stage"] == "t2" and r["arm"] == "rust" and r["rss_kb"]]
-    if rust:
-        lo, hi = min(r["rss_kb"] for r in rust), max(r["rss_kb"] for r in rust)
+    for n_lrs in sorted({r["n_lrs"] for r in rust}):
+        col = [r for r in rust if r["n_lrs"] == n_lrs]
+        lo, hi = min(r["rss_kb"] for r in col), max(r["rss_kb"] for r in col)
         out.append({
-            "check": "liana-rs peak RSS flat across the whole t2 sweep (n_perms x n_lrs)",
-            "rss_kb_min": lo, "rss_kb_max": hi, "spread_kb": hi - lo,
+            "check": f"liana-rs peak RSS flat across n_perms at n_lrs={n_lrs} (50k)",
+            "rss_kb_by_n_perms": {f"p{r['n_perms']}": round(r["rss_kb"]) for r in col},
+            "spread_kb": hi - lo,
             "pass": (hi - lo) < 0.10 * lo,
         })
     return out
@@ -191,7 +193,7 @@ def law(rows):
     law_kb = lambda n_perms, n_lrs: 381 * 1024 + 4.98 * n_perms * n_lrs  # noqa: E731
     out = {"statement": "peak ≈ 381 MB + 4.98 KB × n_perms × n_lrs", "anchors": [], "fit_50k": None}
     for row in rows:
-        if row["stage"] != "t2" or row["arm"] == "rust" or not row["rss_kb"]:
+        if row["stage"] != "t2" or row["arm"] != "release" or not row["rss_kb"]:
             continue
         row["law_pred_kb"] = round(law_kb(row["n_perms"], row["n_lrs"]))
         row["law_residual_kb"] = round(row["rss_kb"] - row["law_pred_kb"])
@@ -334,7 +336,7 @@ def markdown(doc):
     a("Recorded law (release arm, `n_obs=10k`, fitted from the logged mem probes):")
     a("`peak ≈ 381 MB + 4.98 KB × n_perms × n_lrs`. Measured today at 50k, peak RSS in MB:")
     a("")
-    a("| n_perms | arm | n_lrs=200 | n_lrs=1000 | n_lrs=2000 | law @2000 |")
+    a("| n_perms | arm | n_lrs=200 | n_lrs=1000 | n_lrs=2000 | law @2000 (release) |")
     a("|---|---|---|---|---|---|")
     law_kb = lambda n_perms, n_lrs: 381 * 1024 + 4.98 * n_perms * n_lrs  # noqa: E731
     for n_perms in (10, 100, 1000):
@@ -347,10 +349,21 @@ def markdown(doc):
     a("")
     rust_rows = [r for r in rows if r["stage"] == "t2" and r["arm"] == "rust" and r["rss_kb"]]
     if rust_rows:
+        cols = {}
+        for r in rust_rows:
+            cols.setdefault(r["n_lrs"], []).append(r)
+        spreads = []
+        for n_lrs in sorted(cols):
+            col = cols[n_lrs]
+            lo, hi = min(r["rss_kb"] for r in col), max(r["rss_kb"] for r in col)
+            spreads.append(f"{n_lrs} LRs: {fmt_mb(lo)}–{fmt_mb(hi)} MB "
+                           f"({(hi - lo) / lo * 100:.1f}%)")
         lo, hi = min(r["rss_kb"] for r in rust_rows), max(r["rss_kb"] for r in rust_rows)
-        a(f"Across the whole 3×3 grid the rust arm's peak spans {fmt_mb(lo)}–{fmt_mb(hi)} MB "
-          f"({(hi - lo) / lo * 100:.1f}% of the floor);")
-        a("its memory is the input matrix, not the null — flat in `n_perms` and in `n_lrs`.")
+        a(f"At fixed resource size the rust arm's peak is flat in `n_perms` "
+          f"(across p10/p100/p1000 — {', '.join(spreads)}); the permutation null")
+        a(f"adds nothing measurable. The whole grid spans {fmt_mb(lo)}–{fmt_mb(hi)} MB, and")
+        a("the growth is the resource side — the LR table the method carries — not memory")
+        a("of the perms.")
     fit = doc["law"].get("fit_50k")
     if fit:
         a("")
@@ -358,7 +371,7 @@ def markdown(doc):
         a(f"shape) gives slope **{fit['slope_kb_per_perm_lr']:.2f} KB per (perm × LR)** — the")
         a(f"recorded 4.98 KB holds — with intercept **{fit['intercept_mb']} MB**, larger than")
         a("the recorded 381 MB because the intercept carries the dataset (50k's matrix is")
-        a("bigger than 10k's). Anchors at 10k:")
+        a("bigger than 10k's). Anchors at 10k (release arm — where the law was fitted):")
         a("")
         a("| config | measured MB | law MB | residual MB |")
         a("|---|---|---|---|")
