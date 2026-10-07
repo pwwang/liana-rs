@@ -23,6 +23,8 @@ anndata = "0.7"
 anndata-hdf5 = "0.5"
 # `static` builds the bundled HDF5 C library (needs cmake + a C compiler); it is
 # the same feature set `anndata-hdf5` requests, so both unify on one build.
-hdf5-metno = { version = "0.12", features = ["static"] }
+# `zlib` compiles deflate in: real-world `.h5ad` files are gzip-chunked, and
+# without it HDF5 tries to load the filter as a plugin and fails.
+hdf5-metno = { version = "0.12", features = ["static", "zlib"] }
 polars = "0.53"
 ndarray = "0.17"
