@@ -53,7 +53,7 @@ PINNED_COMMIT = "c59472ccc9de8360dbbf5016db75f8abde08dd3e"
 FIXTURES = {
     "synthetic.h5ad": {"groupby": "cell_type", "resource": "toy_all_pairs"},
 }
-METHODS = ["cellphonedb", "geometric_mean", "rank_aggregate"]
+METHODS = ["cellphonedb", "geometric_mean", "cellchat", "rank_aggregate"]
 N_PERMS = [100, 1000]
 SEED = 1337
 N_JOBS = 1  # single-threaded: keeps permutation results reproducible

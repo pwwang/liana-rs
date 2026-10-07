@@ -12,7 +12,18 @@ use rayon::prelude::*;
 
 use crate::perms::null::TIE_RTOL;
 use crate::perms::rng::PermsStream;
+use crate::perms::trimean::{self, LabelIndex};
 use crate::prep::Prep;
+
+/// The null aggregation `_get_means_perms` runs: the per-label means every
+/// permutation-scored method scores against, or the trimeans of `X / norm`
+/// cellchat does (`_liana_pipe.py:661-665` sets `aggregation="trimean"` and
+/// `norm_factor=mat_max` from the frame's `mat_max` column).
+#[derive(Debug, Clone, Copy)]
+pub enum Aggregation {
+    Mean,
+    Trimean { norm: f32 },
+}
 
 /// One output row's four cube coordinates per permutation: the ligand
 /// statistic is `cube[p, source, ligand]`, the receptor one
@@ -63,6 +74,41 @@ pub fn block_sums(prep: &Prep, perms: &[u16], nb: usize) -> Vec<f64> {
     cube
 }
 
+/// One block of `nb` permutations of per-cluster trimeans, row-major
+/// `(nb, n_labels, n_vars)` — `_perm_group_trimeans` (`_get_mean_perms.py:194`)
+/// restricted to a permutation range: per (permutation, label) the permuted
+/// rows' stored values are bucketed by gene (counting sort) and reduced with
+/// `_sparse_trimean` over the label's cell count. `scaled` is the `X / norm`
+/// the trimeans run on, `labels` the position grouping.
+pub(crate) fn block_trimeans(
+    prep: &Prep,
+    scaled: &[f32],
+    labels: &LabelIndex,
+    perms: &[u16],
+    nb: usize,
+) -> Vec<f64> {
+    let (n_obs, n_labels, n_vars) = (prep.x.n_rows, prep.n_labels(), prep.n_vars());
+    assert_eq!(perms.len(), nb * n_obs, "permutation block shape");
+    let mut cube = vec![0f64; nb * n_labels * n_vars];
+
+    cube.par_chunks_mut(n_vars)
+        .enumerate()
+        .for_each(|(task, slab)| {
+            let (p, label) = (task / n_labels, task % n_labels);
+            let rows = &perms[p * n_obs..(p + 1) * n_obs];
+            trimean::label_trimeans(
+                prep,
+                scaled,
+                labels.cells(label),
+                prep.counts[label],
+                |position| rows[position] as usize,
+                |value| value,
+                slab,
+            );
+        });
+    cube
+}
+
 /// The per-row p-values of `_calculate_pvals` (`_get_mean_perms.py:367-397`),
 /// streamed: the fraction of permutations whose combined ligand/receptor
 /// statistic — `combine`, the method's score function — is at least the
@@ -74,6 +120,11 @@ pub fn block_sums(prep: &Prep, perms: &[u16], nb: usize) -> Vec<f64> {
 /// result does not depend on it: the permutation stream and every per-row
 /// count are what they would be at any other count. The p-values are returned
 /// in `rows`' order.
+// Every argument is a distinct input (the prepared matrix, the row selection,
+// the observed statistics, the run's seed/permutation/worker counts, the
+// aggregation, the scorer); an argument struct would only move the same list
+// to the call sites.
+#[allow(clippy::too_many_arguments)]
 pub fn pvals_streaming(
     prep: &Prep,
     rows: &[RowSel],
@@ -81,6 +132,7 @@ pub fn pvals_streaming(
     seed: u64,
     n_perms: usize,
     threads: usize,
+    aggregation: Aggregation,
     combine: impl Fn(f64, f64) -> f64 + Sync,
 ) -> Vec<f64> {
     assert_eq!(rows.len(), truth.len(), "row selections vs truth");
@@ -95,6 +147,13 @@ pub fn pvals_streaming(
     let (n_labels, n_vars) = (prep.n_labels(), prep.n_vars());
     let slab = n_labels * n_vars;
 
+    // The trimean aggregation's inputs, built once per run: the `X / norm` the
+    // null's rows gather from and the label position groups.
+    let trimean_inputs = match aggregation {
+        Aggregation::Mean => None,
+        Aggregation::Trimean { norm } => Some((trimean::scaled(prep, norm), LabelIndex::new(prep))),
+    };
+
     let counts = in_pool(threads, || {
         let mut counts = vec![0u32; rows.len()];
         let mut stream = PermsStream::new(seed, prep.x.n_rows);
@@ -102,7 +161,10 @@ pub fn pvals_streaming(
         while done < n_perms {
             let nb = workers.min(n_perms - done);
             let perms = stream.next_block(nb);
-            let cube = block_sums(prep, &perms, nb);
+            let cube = match &trimean_inputs {
+                None => block_sums(prep, &perms, nb),
+                Some((scaled, labels)) => block_trimeans(prep, scaled, labels, &perms, nb),
+            };
 
             let chunk = counts.len().div_ceil(workers).max(1);
             counts
@@ -266,12 +328,70 @@ mod tests {
         let widened: Vec<f64> = truth.iter().map(|&t| f64::from(t)).collect();
         for threads in [0, 1, 2, 32] {
             assert_eq!(
-                pvals_streaming(&prep, &rows, &widened, 1337, n_perms, threads, |a, b| (a
-                    + b)
-                    / 2.0),
+                pvals_streaming(
+                    &prep,
+                    &rows,
+                    &widened,
+                    1337,
+                    n_perms,
+                    threads,
+                    Aggregation::Mean,
+                    |a, b| (a + b) / 2.0,
+                ),
                 expected,
                 "threads = {threads}"
             );
         }
+    }
+
+    /// The trimean blocks against the oracle's own `_sparse_trimean` over the
+    /// five permutations of seed 1337 (`[2,0,1] [0,2,1] [1,2,0] [1,0,2]
+    /// [1,2,0]`), as `(perm, A(g0,g1), B(g0,g1))` slabs — e.g. in permutation
+    /// 0, A's positions take cells {2, 0} so `g0` is the trimean of `{1, 7}`
+    /// (`q25 2.5`, median `4`, `q75 5.5`) and `g1` is empty.
+    #[test]
+    fn trimean_blocks_match_the_oracle_kernel() {
+        let prep = prep();
+        let labels = LabelIndex::new(&prep);
+        let scaled = trimean::scaled(&prep, 1.0);
+        let perms = permutation_matrix(1337, prep.x.n_rows, 5);
+        let cube = block_trimeans(&prep, &scaled, &labels, &perms, 5);
+
+        let expected = [
+            [4.0, 0.0, 3.0, 5.0],
+            [4.0, 0.0, 3.0, 5.0],
+            [5.0, 2.5, 1.0, 0.0],
+            [2.0, 2.5, 7.0, 0.0],
+            [5.0, 2.5, 1.0, 0.0],
+        ];
+        for (p, slab) in expected.iter().enumerate() {
+            assert_eq!(
+                &cube[p * 4..(p + 1) * 4],
+                slab,
+                "permutation {p} ({:?})",
+                &perms[p * 3..(p + 1) * 3]
+            );
+        }
+
+        // the (A -> B, g0 -> g0) row against `truth = 4`: the permuted
+        // statistics `(4+3)/2, (4+3)/2, (5+1)/2, (2+7)/2, (5+1)/2` clear it
+        // once (permutation 3), so the p-value is 1/5
+        let rows = [RowSel {
+            source: 0,
+            target: 1,
+            ligand: 0,
+            receptor: 0,
+        }];
+        let streamed = pvals_streaming(
+            &prep,
+            &rows,
+            &[4.0],
+            1337,
+            5,
+            1,
+            Aggregation::Trimean { norm: 1.0 },
+            |a, b| (a + b) / 2.0,
+        );
+        assert_eq!(streamed, vec![0.2]);
     }
 }

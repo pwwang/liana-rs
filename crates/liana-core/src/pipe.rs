@@ -1,6 +1,6 @@
 //! The permutation-scored single-cell pipelines end to end — `_prepare_lr_stats`,
-//! `_run_method` and `_sort_by_score` for `liana.method.sc._cellphonedb` and
-//! `liana.method.sc._geometric_mean`.
+//! `_run_method` and `_sort_by_score` for `liana.method.sc._cellphonedb`,
+//! `liana.method.sc._geometric_mean` and `liana.method.sc._cellchat`.
 //!
 //! Reproduces `testdata/expected/synthetic__<method>__p{100,1000}.csv` from
 //! `testdata/fixtures/synthetic.h5ad`, the toy resource, `seed=1337` and the
@@ -11,8 +11,9 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Result, bail};
 
 use crate::io::Adata;
-use crate::perms::engine::{self, RowSel};
+use crate::perms::engine::{self, Aggregation, RowSel};
 use crate::perms::null::gmean32;
+use crate::perms::trimean;
 use crate::prep::{self, Prep};
 use crate::resource::{self, LrPair, LrSubunit};
 
@@ -25,6 +26,55 @@ pub const CPDB_CSV_HEADER: &str = "ligand,ligand_complex,ligand_means,ligand_pro
 pub const GMEAN_CSV_HEADER: &str = "ligand,ligand_complex,ligand_means,ligand_props,\
                                     receptor,receptor_complex,receptor_means,receptor_props,\
                                     source,target,lr_gmeans,gmean_pvals";
+
+/// The oracle CSV header of [`run_cellchat`]'s rows (`np.union1d` orders the
+/// frame's columns alphabetically, and cellchat's `_complex_cols` reassemble
+/// in place of the means).
+pub const CELLCHAT_CSV_HEADER: &str = "ligand,ligand_complex,ligand_props,ligand_trimean,\
+                                       mat_max,receptor,receptor_complex,receptor_props,\
+                                       receptor_trimean,source,target,lr_probs,cellchat_pvals";
+
+/// One row of cellchat's output, in the oracle CSV's column order: `lr_probs`
+/// and `cellchat_pvals` are `_cellchat`'s magnitude and specificity, and the
+/// trimean columns replace the means`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CellchatRow {
+    pub ligand: String,
+    pub ligand_complex: String,
+    pub ligand_props: f64,
+    pub ligand_trimean: f64,
+    pub mat_max: f32,
+    pub receptor: String,
+    pub receptor_complex: String,
+    pub receptor_props: f64,
+    pub receptor_trimean: f64,
+    pub source: String,
+    pub target: String,
+    pub lr_probs: f64,
+    pub cellchat_pvals: f64,
+}
+
+impl CellchatRow {
+    /// The row as the oracle CSV writes it, like [`LrRow::to_csv_line`].
+    pub fn to_csv_line(&self) -> String {
+        format!(
+            "{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            self.ligand,
+            self.ligand_complex,
+            self.ligand_props,
+            self.ligand_trimean,
+            self.mat_max,
+            self.receptor,
+            self.receptor_complex,
+            self.receptor_props,
+            self.receptor_trimean,
+            self.source,
+            self.target,
+            self.lr_probs,
+            self.cellchat_pvals,
+        )
+    }
+}
 
 /// One row of a method's output, in the oracle CSV's column order.
 ///
@@ -88,6 +138,11 @@ struct StatsRow {
     ligand_props: f64,
     receptor_means: f32,
     receptor_props: f64,
+    /// The trimean columns cellchat's `_complex_cols` reassemble in place of
+    /// the means; `None` on the mean-aggregation frames, which never read
+    /// them.
+    ligand_trimean: Option<f64>,
+    receptor_trimean: Option<f64>,
 }
 
 type Key = (usize, usize, usize);
@@ -107,6 +162,10 @@ struct Frame {
     /// The `perms[:, source, ligand]` / `perms[:, target, receptor]`
     /// coordinates `_run_method` selects.
     sel: Vec<RowSel>,
+    /// cellchat's `mat_max` — `np.float32(get_x(adata).max())` over the
+    /// prepared matrix (`_liana_pipe.py:141`), which is also the null's
+    /// `norm_factor`; `None` on the mean-aggregation frames.
+    mat_max: Option<f32>,
 }
 
 impl Frame {
@@ -152,14 +211,65 @@ impl Frame {
         });
         out
     }
+
+    /// The cellchat output rows with their p-values, sorted by `lr_probs`
+    /// descending — `_sort_by_score` again, on `_cellchat`'s magnitude
+    /// (`magnitude_ascending=False`).
+    fn finish_cellchat(&self, lr_probs: &[f64], pvals: Vec<f64>) -> Vec<CellchatRow> {
+        let mat_max = self.mat_max.expect("trimean frame");
+        let mut out: Vec<CellchatRow> = lr_probs
+            .iter()
+            .zip(pvals)
+            .enumerate()
+            .map(|(index, (&lr_probs, cellchat_pvals))| {
+                let row = &self.rows[index];
+                let exploded = &self.subunits[row.subunit];
+                CellchatRow {
+                    ligand: exploded.ligand.clone(),
+                    ligand_complex: exploded.ligand_complex.clone(),
+                    ligand_props: row.ligand_props,
+                    ligand_trimean: row.ligand_trimean.expect("trimean frame"),
+                    mat_max,
+                    receptor: exploded.receptor.clone(),
+                    receptor_complex: exploded.receptor_complex.clone(),
+                    receptor_props: row.receptor_props,
+                    receptor_trimean: row.receptor_trimean.expect("trimean frame"),
+                    source: self.prep.labels[row.source].clone(),
+                    target: self.prep.labels[row.target].clone(),
+                    lr_probs,
+                    cellchat_pvals,
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| {
+            b.lr_probs
+                .partial_cmp(&a.lr_probs)
+                .expect("lr_probs is never NaN")
+        });
+        out
+    }
 }
 
 /// `_prepare_lr_stats` + reassembly, shared by the permutation-scored methods.
 ///
 /// `expr_prop` and `min_cells` are liana's `expr_prop` (as in
 /// `_filter_reassemble_complexes`) and the `min_cells` of `prep_check_adata`.
-fn frame(adata: &Adata, resource: &[LrPair], expr_prop: f64, min_cells: usize) -> Result<Frame> {
+/// `trimean` selects cellchat's frame: the per-label trimeans of `X / mat_max`
+/// join the rows and reassemble in place of the means.
+fn frame(
+    adata: &Adata,
+    resource: &[LrPair],
+    expr_prop: f64,
+    min_cells: usize,
+    trimean: bool,
+) -> Result<Frame> {
     let prep = prep::prepare(adata, min_cells)?;
+
+    // cellchat's `mat_max`: the prepared matrix' maximum, the implicit zeros
+    // as its floor (`np.max` of a sparse matrix), with `1.0f32 / mat_max` the
+    // multiplier `(X / mat_max)` reduces to.
+    let mat_max = trimean.then(|| prep.x.data.iter().copied().fold(0.0f32, f32::max));
+    let trimeans = mat_max.map(|norm| trimean::observed(&prep, norm));
 
     // A passed resource is deduplicated on its pair columns, first occurrence
     // winning (`resource/select_resource.py:107`); the `dropna` half of that
@@ -203,6 +313,13 @@ fn frame(adata: &Adata, resource: &[LrPair], expr_prop: f64, min_cells: usize) -
             for (subunit, exploded) in subunits.iter().enumerate() {
                 let ligand = gene_index(&prep, &exploded.ligand, "ligand")?;
                 let receptor = gene_index(&prep, &exploded.receptor, "receptor")?;
+                let (ligand_trimean, receptor_trimean) = match &trimeans {
+                    Some(table) => (
+                        Some(table[source * prep.n_vars() + ligand]),
+                        Some(table[target * prep.n_vars() + receptor]),
+                    ),
+                    None => (None, None),
+                };
                 rows.push(StatsRow {
                     source,
                     target,
@@ -212,12 +329,28 @@ fn frame(adata: &Adata, resource: &[LrPair], expr_prop: f64, min_cells: usize) -
                     ligand_props: prep.prop(source, ligand),
                     receptor_means: prep.mean(target, receptor),
                     receptor_props: prep.prop(target, receptor),
+                    ligand_trimean,
+                    receptor_trimean,
                 });
             }
         }
     }
 
-    reassemble(&mut rows, expr_prop)?;
+    if trimean {
+        reassemble(
+            &mut rows,
+            expr_prop,
+            |row| row.ligand_trimean.expect("trimean frame"),
+            |row| row.receptor_trimean.expect("trimean frame"),
+        )?;
+    } else {
+        reassemble(
+            &mut rows,
+            expr_prop,
+            |row| row.ligand_means,
+            |row| row.receptor_means,
+        )?;
+    }
 
     // `_run_method`'s selection (`_liana_pipe.py:682-686`): the cube
     // coordinates each row scores against, resolved once.
@@ -237,6 +370,7 @@ fn frame(adata: &Adata, resource: &[LrPair], expr_prop: f64, min_cells: usize) -
         subunits,
         rows,
         sel,
+        mat_max,
     })
 }
 
@@ -251,7 +385,7 @@ pub fn run_cellphonedb(
     seed: u64,
     n_perms: usize,
 ) -> Result<Vec<LrRow>> {
-    let frame = frame(adata, resource, expr_prop, min_cells)?;
+    let frame = frame(adata, resource, expr_prop, min_cells, false)?;
 
     // `_cpdb_score`: zero_msk = either subunit mean zero (`_cellphonedb.py:22-26`)
     let magnitudes: Vec<f32> = frame
@@ -273,9 +407,54 @@ pub fn run_cellphonedb(
         seed,
         n_perms,
         0,
+        Aggregation::Mean,
         |ligand, receptor| (ligand + receptor) / 2.0,
     );
     Ok(frame.finish(&magnitudes, specificities))
+}
+
+/// The cellchat run for one `n_perms`: `lr_probs` = the two subunit trimeans'
+/// product through the Hill function `p / (0.5 + p)` (`_cellchat.py:16-25`),
+/// and `cellchat_pvals` over the trimean nulls of the same statistic.
+pub fn run_cellchat(
+    adata: &Adata,
+    resource: &[LrPair],
+    expr_prop: f64,
+    min_cells: usize,
+    seed: u64,
+    n_perms: usize,
+) -> Result<Vec<CellchatRow>> {
+    let frame = frame(adata, resource, expr_prop, min_cells, true)?;
+    let norm = frame.mat_max.expect("trimean frame");
+
+    // `_lr_probability` with `_KH = 0.5`; no zero mask here (`_cellchat_score`
+    // has none), and `_apply_proximity_weights` is the identity without a
+    // `proximity` column.
+    let probability = |ligand: f64, receptor: f64| {
+        let product = ligand * receptor;
+        product / (0.5 + product)
+    };
+    let probs: Vec<f64> = frame
+        .rows
+        .iter()
+        .map(|row| {
+            probability(
+                row.ligand_trimean.expect("trimean frame"),
+                row.receptor_trimean.expect("trimean frame"),
+            )
+        })
+        .collect();
+    let pvals = engine::pvals_streaming(
+        &frame.prep,
+        &frame.sel,
+        &probs,
+        seed,
+        n_perms,
+        0,
+        Aggregation::Trimean { norm },
+        probability,
+    );
+    Ok(frame.finish_cellchat(&probs, pvals))
 }
 
 /// The geometric_mean run for one `n_perms`: `lr_gmeans` = scipy's `gmean` of
@@ -289,7 +468,7 @@ pub fn run_geometric_mean(
     seed: u64,
     n_perms: usize,
 ) -> Result<Vec<LrRow>> {
-    let frame = frame(adata, resource, expr_prop, min_cells)?;
+    let frame = frame(adata, resource, expr_prop, min_cells, false)?;
     let magnitudes: Vec<f32> = frame
         .rows
         .iter()
@@ -303,6 +482,7 @@ pub fn run_geometric_mean(
         seed,
         n_perms,
         0,
+        Aggregation::Mean,
         |ligand, receptor| ((ligand.ln() + receptor.ln()) / 2.0).exp(),
     );
     Ok(frame.finish(&magnitudes, specificities))
@@ -310,8 +490,14 @@ pub fn run_geometric_mean(
 
 /// `_filter_reassemble_complexes` (`liana/resource/_reassemble_complexes.py:11-87`):
 /// drop the keys whose `prop_min` is below `expr_prop`, reduce each complex's
-/// statistics to its subunits' minimum, and leave one row per key.
-fn reassemble(rows: &mut Vec<StatsRow>, expr_prop: f64) -> Result<()> {
+/// statistics — the method's `_complex_cols`, ligand column first, then the
+/// receptor's — to its subunits' minimum, and leave one row per key.
+fn reassemble<T: PartialOrd + Copy>(
+    rows: &mut Vec<StatsRow>,
+    expr_prop: f64,
+    ligand: impl Fn(&StatsRow) -> T,
+    receptor: impl Fn(&StatsRow) -> T,
+) -> Result<()> {
     // `prop_min` (`:46-54`): the minimum of the key's stacked
     // `ligand_props`/`receptor_props` — over every exploded subunit row, both
     // sides.
@@ -338,10 +524,10 @@ fn reassemble(rows: &mut Vec<StatsRow>, expr_prop: f64) -> Result<()> {
     }
     rows.retain(|row| kept.contains(&key_of(row)));
 
-    // `_reduce_complexes` (`:79-85`), `ligand_means` then `receptor_means`:
-    // each pass keeps only the rows tied at that column's per-key minimum.
-    reduce_by_min(rows, |row| row.ligand_means);
-    reduce_by_min(rows, |row| row.receptor_means);
+    // `_reduce_complexes` (`:79-85`), `_complex_cols` in order: each pass
+    // keeps only the rows tied at that column's per-key minimum.
+    reduce_by_min(rows, &ligand);
+    reduce_by_min(rows, &receptor);
 
     // `drop_duplicates(subset=_key_cols, keep="first")` (`:85`): one row per
     // key, the first in the surviving order.
@@ -350,12 +536,17 @@ fn reassemble(rows: &mut Vec<StatsRow>, expr_prop: f64) -> Result<()> {
     Ok(())
 }
 
-fn reduce_by_min(rows: &mut Vec<StatsRow>, value: impl Fn(&StatsRow) -> f32) {
-    let mut mins: HashMap<Key, f32> = HashMap::new();
+fn reduce_by_min<T: PartialOrd + Copy>(rows: &mut Vec<StatsRow>, value: impl Fn(&StatsRow) -> T) {
+    let mut mins: HashMap<Key, T> = HashMap::new();
     for row in rows.iter() {
+        let current = value(row);
         mins.entry(key_of(row))
-            .and_modify(|min| *min = min.min(value(row)))
-            .or_insert_with(|| value(row));
+            .and_modify(|min| {
+                if current < *min {
+                    *min = current;
+                }
+            })
+            .or_insert(current);
     }
     rows.retain(|row| value(row) == mins[&key_of(row)]);
 }
@@ -434,7 +625,18 @@ mod tests {
             ligand_props: 1.0,
             receptor_means,
             receptor_props: 1.0,
+            ligand_trimean: None,
+            receptor_trimean: None,
         }
+    }
+
+    fn by_means(rows: &mut Vec<StatsRow>, expr_prop: f64) -> Result<()> {
+        reassemble(
+            rows,
+            expr_prop,
+            |row| row.ligand_means,
+            |row| row.receptor_means,
+        )
     }
 
     /// `_reduce_complexes` (`:90-114`) runs the two columns' minimum reductions
@@ -443,7 +645,7 @@ mod tests {
     #[test]
     fn complexes_reduce_column_by_column() {
         let mut rows = vec![row(0, 5.0, 1.0), row(1, 1.0, 9.0)];
-        reassemble(&mut rows, 0.05).unwrap();
+        by_means(&mut rows, 0.05).unwrap();
         assert_eq!(rows.len(), 1, "one row per key survives");
         assert_eq!(rows[0].subunit, 1, "the ligand pass dropped subunit 0");
         assert_eq!(rows[0].ligand_means, 1.0);
@@ -456,7 +658,7 @@ mod tests {
     #[test]
     fn complex_ties_keep_the_first_row_whole() {
         let mut rows = vec![row(0, 1.0, 5.0), row(1, 1.0, 9.0)];
-        reassemble(&mut rows, 0.05).unwrap();
+        by_means(&mut rows, 0.05).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].subunit, 0);
         assert_eq!(rows[0].receptor_means, 5.0);

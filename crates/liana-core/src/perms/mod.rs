@@ -4,3 +4,4 @@
 pub mod engine;
 pub mod null;
 pub mod rng;
+pub mod trimean;
