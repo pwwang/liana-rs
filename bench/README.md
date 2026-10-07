@@ -129,4 +129,4 @@ exact commands.
 
 `manifest.json` itself carries these structural fingerprints (not checksums)
 per dataset — `sc_1000`, `sc_10000`, `sc_50000`, `sc_100000` — and lives at
-`/mnt/d/Programs/hermes/profiles/work/cache/scratch/p0a/data_manifest/manifest.json`.
+`<phase0-workspace>/data_manifest/manifest.json`.
