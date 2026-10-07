@@ -18,14 +18,14 @@ jobs:
     strategy:
       # One platform failing must not cancel the others.
       fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64 }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x64 }
     # Windows is best-effort: the bundled-HDF5 static build may not link under
     # MSVC yet.
     continue-on-error: ${{ matrix.os == 'windows-latest' }}
-    matrix:
-      include:
-        - { os: ubuntu-latest, target: x86_64 }
-        - { os: macos-latest, target: aarch64-apple-darwin }
-        - { os: windows-latest, target: x64 }
     steps:
       - uses: actions/checkout@v4
 
