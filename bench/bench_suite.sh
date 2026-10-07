@@ -15,7 +15,7 @@
 # stage, so re-running a stage is idempotent). `bench/collect_results.py`
 # assembles the TSVs into bench/results.json.
 #
-# Usage: bench/bench_suite.sh [stage ...]        stages: t1 t2 t3 t4 t5
+# Usage: bench/bench_suite.sh [stage ...]        stages: t1 t2 t3 t4 t5 t6
 #        OUTDIR=... DATA_DIR=... bench/bench_suite.sh [stage ...]
 set -u
 
@@ -28,7 +28,7 @@ seed=1337
 export PATH="$HOME/.cargo/bin:$PATH"
 
 stages=("$@")
-[ ${#stages[@]} -eq 0 ] && stages=(t1 t2 t3 t4 t5)
+[ ${#stages[@]} -eq 0 ] && stages=(t1 t2 t3 t4 t5 t6)
 
 mkdir -p "$out/resources"
 log="$out/suite.log"
@@ -272,6 +272,21 @@ t5() { # 4,620-LR resource, 50k x 1000: the release arm's ~23 GB bet
         fi
     done
     say "t5 free after: $(free -m | sed -n 2p)"
+}
+
+t6() { # per-method rows: CellPhoneDB and CellChat alone at 50k x 2000 LRs x p1000
+    local tsv="$out/results_t6.tsv" method arm
+    : > "$tsv" "$out/cmds_t6.tsv"
+    for method in cellphonedb cellchat; do
+        for arm in rust release patched; do
+            say "t6 $method 50k p1000 $arm"
+            if [ "$arm" = rust ]; then
+                rust_run "$tsv" "t6_${method}_50k_p1000_rust" "$method" 50000 1000 4 resource_50000.csv
+            else
+                py_run "$tsv" "t6_${method}_50k_p1000_${arm}" "$arm" "$method" 50000 1000 4 resource_50000.csv
+            fi
+        done
+    done
 }
 
 # --- main --------------------------------------------------------------------

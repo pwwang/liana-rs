@@ -87,8 +87,10 @@ lands in `target/bench/`.
 
 ## The paper suite (W7)
 
-`bench/bench_suite.sh [stage ...]` (stages `t1`–`t5`, default all) is the frozen
-benchmark matrix over `rank_aggregate` through three arms:
+`bench/bench_suite.sh [stage ...]` (stages `t1`–`t6`, default all) is the frozen
+benchmark matrix over `rank_aggregate` — with `t6` adding the per-method rows,
+CellPhoneDB and CellChat alone at 50k × 2,000 LRs × 1,000 perms — through
+three arms:
 
 | arm | what runs |
 |---|---|

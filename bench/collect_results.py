@@ -2,7 +2,7 @@
 `bench/results.json` — the frozen, machine-readable manifest behind
 `bench/RESULTS.md`.
 
-Reads   <outdir>/results_t{1..5}.tsv, <outdir>/cmds_t{1..5}.tsv
+Reads   <outdir>/results_t{1..6}.tsv, <outdir>/cmds_t{1..6}.tsv
         (default outdir: <repo>/target/bench7)
 Writes  <repo>/bench/results.json, <repo>/bench/RESULTS.md
 
@@ -27,7 +27,7 @@ DATA = pathlib.Path("/home/pwwang/p0a/data")
 VENV_PY = pathlib.Path("/home/pwwang/p0a/venv/bin/python")
 P0A_LOGS = pathlib.Path("/home/pwwang/p0a/logs")
 
-STAGES = ["t1", "t2", "t3", "t4", "t5"]
+STAGES = ["t1", "t2", "t3", "t4", "t5", "t6"]
 COLUMNS = [
     "label", "arm", "method", "n_obs", "n_lrs", "n_perms", "threads",
     "numba_threads", "rows", "wall_s", "elapsed_s", "rss_kb", "rc", "note",
@@ -164,15 +164,16 @@ def checks(rows):
     out = []
     by_cfg = {}
     for row in rows:
-        if row["stage"] in ("t1", "t2", "t5") and row["rows"]:
+        if row["stage"] in ("t1", "t2", "t5", "t6") and row["rows"]:
             by_cfg.setdefault(
-                (row["stage"], row["n_obs"], row["n_perms"], row["n_lrs"]), []
+                (row["stage"], row["method"], row["n_obs"], row["n_perms"],
+                 row["n_lrs"]), []
             ).append((row["arm"], row["rows"]))
     for cfg, arms in sorted(by_cfg.items(), key=lambda kv: str(kv[0])):
         counts = {r for _, r in arms}
         out.append({
             "check": "row count agrees across arms",
-            "config": f"{cfg[0]} n_obs={cfg[1]} n_perms={cfg[2]} n_lrs={cfg[3]}",
+            "config": f"{cfg[0]} {cfg[1]} n_obs={cfg[2]} n_perms={cfg[3]} n_lrs={cfg[4]}",
             "arms": dict(arms), "pass": len(counts) == 1,
         })
     rust = [r for r in rows if r["stage"] == "t2" and r["arm"] == "rust" and r["rss_kb"]]
@@ -466,6 +467,25 @@ def markdown(doc):
         elif rel:
             a("It did not finish (see the note); the measured arms and the prediction stand "
               "as the extrapolation.")
+    else:
+        a("Not run in this pass.")
+    a("")
+
+    # ---- T6
+    a("## T6 — per-method rows: CellPhoneDB and CellChat alone, 50k × p1000")
+    a("")
+    a("The aggregate assembles all nine methods at once; this stage runs two of its")
+    a("constituent permutation-scored methods on their own, through the same harness at")
+    a("the same configuration (50k cells × 2,000 LRs × 1,000 perms, 4 threads). These are")
+    a("the rows §3.2 of the manuscript cites for the per-method claim.")
+    a("")
+    rows6 = [r for r in rows if r["stage"] == "t6"]
+    if rows6:
+        a("| method | arm | wall (s) | elapsed (s) | peak RSS (MB) |")
+        a("|---|---|---|---|---|")
+        for row in sorted(rows6, key=lambda r: (r["method"], r["label"])):
+            a(f"| {row['method']} | {row['arm']} | {fmt_s(row['wall_s'])} | "
+              f"{fmt_s(row['elapsed_s'])} | {fmt_mb(row['rss_kb'])} |")
     else:
         a("Not run in this pass.")
     a("")

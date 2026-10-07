@@ -2,7 +2,7 @@
 
 The frozen numbers behind the paper's figures. Every row was measured on one
 box — 13th Gen Intel(R) Core(TM) i9-13900, 32 vCPU, 47 GB RAM, kernel 6.18.33.2-microsoft-standard-WSL2 — in serial
-passes of `bench/bench_suite.sh` on 2026-10-06, seed 1337: stages
+passes of `bench/bench_suite.sh` on 2026-10-07, seed 1337: stages
 t1–t4 in one run; t5 re-run once (each stage rewrites its own TSV) after its
 4,620-LR resource was rebuilt — the failed first attempt is kept in
 `target/bench7/miss_t5_resource/`. The
@@ -142,6 +142,22 @@ kept in `target/bench7/miss_t5_resource/`). The law below is in
 
 The law predicts 22849 MB (~22.3 GiB) for the release arm at this configuration.
 It ran: 23747 MB measured, 42.36 s whole-process — the box (47 GB) fit it.
+
+## T6 — per-method rows: CellPhoneDB and CellChat alone, 50k × p1000
+
+The aggregate assembles all nine methods at once; this stage runs two of its
+constituent permutation-scored methods on their own, through the same harness at
+the same configuration (50k cells × 2,000 LRs × 1,000 perms, 4 threads). These are
+the rows §3.2 of the manuscript cites for the per-method claim.
+
+| method | arm | wall (s) | elapsed (s) | peak RSS (MB) |
+|---|---|---|---|---|
+| cellchat | patched | 104.93 | 107.18 | 1120 |
+| cellchat | release | 107.85 | 110.02 | 11426 |
+| cellchat | rust | 68.15 | 74.01 | 326 |
+| cellphonedb | patched | 11.91 | 21.76 | 1086 |
+| cellphonedb | release | 14.23 | 16.51 | 10216 |
+| cellphonedb | rust | 8.70 | 8.70 | 298 |
 
 ## Recorded references (`/home/pwwang/p0a/logs`, read-only)
 
