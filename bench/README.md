@@ -85,6 +85,33 @@ reference), the `n_perms` 100-vs-1000 flatness pair, three 4-thread repeats,
 the 10k point, and the trimean path (`cellchat`) at 100/1000 perms. Raw output
 lands in `target/bench/`.
 
+## The paper suite (W7)
+
+`bench/bench_suite.sh [stage ...]` (stages `t1`–`t5`, default all) is the frozen
+benchmark matrix over `rank_aggregate` through three arms:
+
+| arm | what runs |
+|---|---|
+| `rust` | `bench/engine_bench` — `liana_core::run::Method`, the `liana-rs run` CLI's own dispatch; `RAYON_NUM_THREADS` sets the pool |
+| `release` | liana 2.0.0 in the pinned oracle venv, through `bench/run_arm.py` |
+| `patched` | the same venv with `PYTHONPATH=/home/pwwang/p0a/patched` (W4/W5 memory patch) |
+
+Every run is serial (one measurement at a time) and wrapped in `/usr/bin/time
+-v` for peak RSS + whole-process elapsed; the in-process wall (`wall_s=` /
+`WALL_S=`) rides along. Raw stdout/stderr land in `target/bench7/<label>.{out,err}`,
+one TSV row per run in `target/bench7/results_<stage>.tsv` (rewritten per stage,
+so re-running a stage is idempotent), and the exact command of every row in
+`target/bench7/cmds_<stage>.tsv`.
+
+`bench/run_arm.py` is `run_bench.py`'s sibling for the Python arms: same
+measurement contract, but it takes `--h5ad`/`--resource` paths instead of
+hardcoding the 2000-LR pair — which is what the memory-law sweep (truncated
+resources), the law's 10k anchors and the 4,620-LR consensus run need.
+
+`bench/collect_results.py` reads the TSVs plus the box's versions and checksums
+and writes the committed manifest **`bench/results.json`**; `bench/RESULTS.md`
+is the human table generated from it (the paper's source).
+
 ## Verification (W1-A)
 
 The 10k dataset was regenerated from these scripts into a temp directory and

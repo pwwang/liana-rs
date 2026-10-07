@@ -13,15 +13,22 @@
 //! Threads are the rayon pool's, sized by `RAYON_NUM_THREADS` at pool init;
 //! the effective count is printed as `threads=`.
 //!
-//! Usage: engine-bench --adata <sc_N.h5ad> --resource <resource_N.csv>
-//!        [--method cellphonedb|cellchat] [--n-perms N] [--seed S]
+//! The method dispatch is `liana-rs run`'s own (`run::{Method, Settings}`),
+//! so the numbers are the CLI binary's, with the read kept in the timed
+//! window and the metadata (`n_obs`, `n_genes`, `n_lrs`) taken from the
+//! already-loaded inputs instead of a second pass.
+//!
+//! Usage: engine-bench --adata <sc_N.h5ad> --resource <resource_N.csv|name>
+//!        [--method <any of METHOD_NAMES>] [--n-perms N] [--seed S]
 
 use std::path::PathBuf;
 use std::time::Instant;
 
+use liana_core::run::{Method, Settings};
+
 fn main() {
     let mut adata = None;
-    let mut resource = None;
+    let mut resource: Option<String> = None;
     let mut method = String::from("cellphonedb");
     let mut n_perms = 1000usize;
     let mut seed = 1337u64;
@@ -31,7 +38,7 @@ fn main() {
         let mut value = || args.next().unwrap_or_else(|| panic!("{arg} needs a value"));
         match arg.as_str() {
             "--adata" => adata = Some(PathBuf::from(value())),
-            "--resource" => resource = Some(PathBuf::from(value())),
+            "--resource" => resource = Some(value()),
             "--method" => method = value(),
             "--n-perms" => n_perms = value().parse().expect("--n-perms"),
             "--seed" => seed = value().parse().expect("--seed"),
@@ -39,28 +46,36 @@ fn main() {
         }
     }
     let adata_path = adata.expect("--adata");
-    let resource_path = resource.expect("--resource");
+    let resource = resource.expect("--resource");
+
+    let method = Method::parse(&method).expect("method");
 
     let start = Instant::now();
     let adata = liana_core::io::read_h5ad(&adata_path, "cell_type").expect("read h5ad");
-    let pairs = liana_core::resource::read_pairs(&resource_path).expect("read resource");
-    // `V.expr_prop` / `V.min_cells` of liana 2.0.0's `_core/_constants.py` — what
-    // `bench/run_bench.py` leaves at their defaults on the Python side
-    let rows = match method.as_str() {
-        "cellphonedb" => {
-            liana_core::pipe::run_cellphonedb(&adata, &pairs, 0.05, 5, seed, n_perms, 0)
-                .map(|rows| rows.len())
-        }
-        "cellchat" => liana_core::pipe::run_cellchat(&adata, &pairs, 0.05, 5, seed, n_perms, 0)
-            .map(|rows| rows.len()),
-        other => panic!("unknown method {other}"),
-    }
-    .expect("run");
+    let pairs = liana_core::run::resolve_resource(&resource).expect("resolve resource");
+    // `Settings::default()` is liana 2.0.0's `_core/_constants.py` `DefaultValues`
+    // (expr_prop 0.05, min_cells 5, seed 1337) — what `bench/run_bench.py` leaves
+    // at their defaults on the Python side; `threads = 0` selects the rayon pool
+    // `RAYON_NUM_THREADS` sized, the `liana-rs run` CLI default.
+    let rows = method
+        .run(
+            &adata,
+            &pairs,
+            &Settings {
+                seed,
+                n_perms,
+                ..Settings::default()
+            },
+        )
+        .expect("run")
+        .rows
+        .len();
     let wall = start.elapsed().as_secs_f64();
 
     println!(
-        "method={method} n_obs={} n_genes={} n_lrs={} n_perms={n_perms} seed={seed} \
+        "method={} n_obs={} n_genes={} n_lrs={} n_perms={n_perms} seed={seed} \
          threads={} rows={} wall_s={wall:.2} rss_kb={}",
+        method.name(),
         adata.x.n_rows,
         adata.x.n_cols,
         pairs.len(),
