@@ -3,3 +3,6 @@ ops/logs/
 __pycache__/
 # maturin's `develop` build of the extension module (mixed layout)
 crates/liana-py/python/liana_rs/*.so
+# G2 real-data inputs (fetched, not committed — testdata/real/README.md)
+testdata/real/anndata/
+testdata/real/*.h5ad
