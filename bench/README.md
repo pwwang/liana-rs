@@ -60,6 +60,31 @@ bench/run_one.sh <label> <method> <n_obs> <n_jobs> <timeout_s> [extra args...]
 `run_bench.py` prints `WALL_S=<seconds>` (plus `RES_SHAPE`/`RES_INPLACE`); wrap it
 in `/usr/bin/time -v` for peak RSS.
 
+## The Rust harness (W4-T3)
+
+`bench/engine_bench/` is a workspace member (`cargo build --release -p
+engine-bench`) that runs one liana method end to end on one `.h5ad` + resource
+and prints a single line:
+
+```
+method=cellphonedb n_obs=50000 n_genes=2000 n_lrs=2000 n_perms=1000 seed=1337 \
+threads=4 rows=200000 wall_s=6.68 rss_kb=287660
+```
+
+`rows` mirrors `run_bench.py`'s `RES_INPLACE rows=` (both are the reassembled
+result's row count — 200,000 on the 50k dataset). `expr_prop`/`min_cells` are
+liana 2.0.0's `V.expr_prop = 0.05` / `V.min_cells = 5`, the same defaults the
+Python harness leaves in place. `threads` is the rayon pool's effective size
+(`RAYON_NUM_THREADS`). `rss_kb` is `VmHWM` from `/proc/self/status` — the
+process's peak RSS, the counter `/usr/bin/time -v` prints as "Maximum resident
+set size".
+
+`bench/run_engine_bench.sh [outdir] [data_dir]` is the sweep: the 50k dataset
+at 1/4/8/32 threads (with a 1-perm run per thread count as the read/prep
+reference), the `n_perms` 100-vs-1000 flatness pair, three 4-thread repeats,
+the 10k point, and the trimean path (`cellchat`) at 100/1000 perms. Raw output
+lands in `target/bench/`.
+
 ## Verification (W1-A)
 
 The 10k dataset was regenerated from these scripts into a temp directory and
