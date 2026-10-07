@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 
 use liana_core::io::{Adata, read_h5ad};
 use liana_core::pipe::{
-    CPDB_CSV_HEADER, GMEAN_CSV_HEADER, LrRow, run_cellphonedb, run_geometric_mean,
+    CONNECTOME_CSV_HEADER, CPDB_CSV_HEADER, GMEAN_CSV_HEADER, LrRow, run_cellphonedb,
+    run_connectome, run_geometric_mean,
 };
 use liana_core::resource::{self, LrPair};
 use serde::Deserialize;
@@ -42,20 +43,12 @@ struct Entry {
 /// receptor_complex)`; the oracle CSVs have no duplicate keys.
 type Key = (String, String, String, String);
 
-fn key_of(row: &LrRow) -> Key {
-    (
-        row.source.clone(),
-        row.target.clone(),
-        row.ligand_complex.clone(),
-        row.receptor_complex.clone(),
-    )
-}
-
 /// The method under test: its runner and its CSV contract.
 #[derive(Clone, Copy)]
 enum Method {
     Cellphonedb,
     GeometricMean,
+    Connectome,
 }
 
 impl Method {
@@ -63,6 +56,17 @@ impl Method {
         match self {
             Method::Cellphonedb => "cellphonedb",
             Method::GeometricMean => "geometric_mean",
+            Method::Connectome => "connectome",
+        }
+    }
+
+    /// The `scripts/dump_pipe_ref.py` dump whose frame this method's run
+    /// shares — the whole `lr_res` frame is common, only the score columns
+    /// differ, so geometric_mean is pinned by the cellphonedb dump.
+    fn dump(self) -> &'static str {
+        match self {
+            Method::Cellphonedb | Method::GeometricMean => "cellphonedb",
+            Method::Connectome => "connectome",
         }
     }
 
@@ -70,9 +74,12 @@ impl Method {
         match self {
             Method::Cellphonedb => CPDB_CSV_HEADER,
             Method::GeometricMean => GMEAN_CSV_HEADER,
+            Method::Connectome => CONNECTOME_CSV_HEADER,
         }
     }
 
+    /// The run, as the CSV's cells per row; `seed`/`n_perms` drive the
+    /// permutation-scored methods and are ignored by the non-permutation ones.
     fn run(
         self,
         adata: &Adata,
@@ -81,15 +88,21 @@ impl Method {
         min_cells: usize,
         seed: u64,
         n_perms: usize,
-    ) -> anyhow::Result<Vec<LrRow>> {
-        match self {
-            Method::Cellphonedb => {
-                run_cellphonedb(adata, resource, expr_prop, min_cells, seed, n_perms)
+    ) -> anyhow::Result<Vec<Vec<String>>> {
+        Ok(match self {
+            Method::Cellphonedb => rows_of(run_cellphonedb(
+                adata, resource, expr_prop, min_cells, seed, n_perms,
+            )?),
+            Method::GeometricMean => rows_of(run_geometric_mean(
+                adata, resource, expr_prop, min_cells, seed, n_perms,
+            )?),
+            Method::Connectome => {
+                run_connectome(adata, resource, expr_prop, min_cells, seed, n_perms)?
+                    .into_iter()
+                    .map(|row| row.cells)
+                    .collect()
             }
-            Method::GeometricMean => {
-                run_geometric_mean(adata, resource, expr_prop, min_cells, seed, n_perms)
-            }
-        }
+        })
     }
 }
 
@@ -107,6 +120,10 @@ fn read_csv(path: &Path) -> (Vec<String>, Vec<Vec<String>>) {
         .map(|line| line.split(',').map(str::to_owned).collect())
         .collect();
     (header, rows)
+}
+
+fn rows_of(rows: Vec<LrRow>) -> Vec<Vec<String>> {
+    rows.iter().map(row_fields).collect()
 }
 
 fn row_fields(row: &LrRow) -> Vec<String> {
@@ -136,12 +153,20 @@ fn geometric_mean_pipeline_matches_the_oracle_csv() {
     run_and_compare(Method::GeometricMean);
 }
 
+#[test]
+fn connectome_pipeline_matches_the_oracle_csv() {
+    run_and_compare(Method::Connectome);
+}
+
 fn run_and_compare(method: Method) {
     let name = method.name();
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let reference: Ref = serde_json::from_str(
-        &fs::read_to_string(root.join("testdata/pipe_ref/synthetic__cellphonedb.json"))
-            .expect("dump"),
+        &fs::read_to_string(root.join(format!(
+            "testdata/pipe_ref/synthetic__{}.json",
+            method.dump()
+        )))
+        .expect("dump"),
     )
     .unwrap();
     let adata = read_h5ad(&root.join(&reference.adata), &reference.groupby).unwrap();
@@ -165,7 +190,7 @@ fn run_and_compare(method: Method) {
         let mut text = String::from(method.header());
         text.push('\n');
         for row in &rows {
-            text.push_str(&row.to_csv_line());
+            text.push_str(&row.join(","));
             text.push('\n');
         }
         fs::write(out_dir.join(format!("synthetic__{name}__p{n}.csv")), text).unwrap();
@@ -178,7 +203,13 @@ fn run_and_compare(method: Method) {
 /// Exact keyed comparison of the oracle CSV and the produced rows, reporting
 /// the first diverging row/column with both values. Every column of every
 /// method is compared by bit.
-fn compare(expected_path: &Path, method: Method, rows: &[LrRow], oracle_rows: usize, n: &str) {
+fn compare(
+    expected_path: &Path,
+    method: Method,
+    rows: &[Vec<String>],
+    oracle_rows: usize,
+    n: &str,
+) {
     let name = method.name();
     let (header, expected_rows) = read_csv(expected_path);
     assert_eq!(
@@ -208,12 +239,19 @@ fn compare(expected_path: &Path, method: Method, rows: &[LrRow], oracle_rows: us
             "{name} p{n}: duplicate oracle key"
         );
     }
-    let actual: BTreeMap<Key, &LrRow> = rows.iter().map(|row| (key_of(row), row)).collect();
-    assert_eq!(
-        actual.len(),
-        rows.len(),
-        "{name} p{n}: duplicate produced key"
-    );
+    let mut actual: BTreeMap<Key, &Vec<String>> = BTreeMap::new();
+    for row in rows {
+        let key = (
+            row[column("source")].clone(),
+            row[column("target")].clone(),
+            row[column("ligand_complex")].clone(),
+            row[column("receptor_complex")].clone(),
+        );
+        assert!(
+            actual.insert(key, row).is_none(),
+            "{name} p{n}: duplicate produced key"
+        );
+    }
 
     let missing: Vec<&Key> = expected
         .keys()
@@ -234,7 +272,7 @@ fn compare(expected_path: &Path, method: Method, rows: &[LrRow], oracle_rows: us
     );
 
     for (key, expected_row) in &expected {
-        let actual_fields = row_fields(actual[key]);
+        let actual_fields = &actual[key];
         for (index, column_name) in header.iter().enumerate() {
             let expected_field = &expected_row[index];
             let actual_field = &actual_fields[index];
@@ -255,10 +293,11 @@ fn compare(expected_path: &Path, method: Method, rows: &[LrRow], oracle_rows: us
 /// rest as strings.
 fn equal_field(column: &str, expected: &str, actual: &str) -> bool {
     match column {
-        "ligand_means" | "receptor_means" | "lr_means" | "lr_gmeans" => {
+        "ligand_means" | "receptor_means" | "lr_means" | "lr_gmeans" | "expr_prod" => {
             expected.parse::<f32>().unwrap().to_bits() == actual.parse::<f32>().unwrap().to_bits()
         }
-        "ligand_props" | "receptor_props" | "cellphone_pvals" | "gmean_pvals" => {
+        "ligand_props" | "receptor_props" | "cellphone_pvals" | "gmean_pvals"
+        | "ligand_zscores" | "receptor_zscores" | "scaled_weight" => {
             expected.parse::<f64>().unwrap().to_bits() == actual.parse::<f64>().unwrap().to_bits()
         }
         _ => expected == actual,

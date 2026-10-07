@@ -1,10 +1,13 @@
-//! The permutation-scored single-cell pipelines end to end — `_prepare_lr_stats`,
-//! `_run_method` and `_sort_by_score` for `liana.method.sc._cellphonedb`,
-//! `liana.method.sc._geometric_mean` and `liana.method.sc._cellchat`.
+//! The single-cell pipelines end to end — `_prepare_lr_stats`, `_run_method`
+//! and `_sort_by_score` for `liana.method.sc._cellphonedb`,
+//! `liana.method.sc._geometric_mean`, `liana.method.sc._cellchat` and the
+//! non-permutation `liana.method.sc._connectome`.
 //!
 //! Reproduces `testdata/expected/synthetic__<method>__p{100,1000}.csv` from
 //! `testdata/fixtures/synthetic.h5ad`, the toy resource, `seed=1337` and the
-//! `expr_prop`/`min_cells` the oracle ran with.
+//! `expr_prop`/`min_cells` the oracle ran with. The non-permutation methods
+//! ignore `seed`/`n_perms` — their two `p<N>` runs are identical by
+//! construction.
 
 use std::collections::{HashMap, HashSet};
 
@@ -33,6 +36,31 @@ pub const GMEAN_CSV_HEADER: &str = "ligand,ligand_complex,ligand_means,ligand_pr
 pub const CELLCHAT_CSV_HEADER: &str = "ligand,ligand_complex,ligand_props,ligand_trimean,\
                                        mat_max,receptor,receptor_complex,receptor_props,\
                                        receptor_trimean,source,target,lr_probs,cellchat_pvals";
+
+/// The oracle CSV header of [`run_connectome`]'s rows.
+pub const CONNECTOME_CSV_HEADER: &str = "ligand,ligand_complex,ligand_means,ligand_props,ligand_zscores,\
+                                        receptor,receptor_complex,receptor_means,receptor_props,\
+                                        receptor_zscores,source,target,expr_prod,scaled_weight";
+
+/// One row of a non-permutation method's output: every cell as the oracle CSV
+/// writes it, in the oracle's column order — the frame's columns as
+/// `np.union1d` alphabetizes them, then the method's score columns, appended by
+/// `_run_method` (`_liana_pipe.py:721-724`).
+///
+/// Each cell carries Rust's shortest-round-trip `Display`, which parses back —
+/// Python's `float()`, or `str::parse` in the parity test — to the same bits;
+/// the reader never depends on the decimal spelling matching pandas'.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Row {
+    pub cells: Vec<String>,
+}
+
+impl Row {
+    /// The row as the oracle CSV writes it, like [`LrRow::to_csv_line`].
+    pub fn to_csv_line(&self) -> String {
+        self.cells.join(",")
+    }
+}
 
 /// One row of cellchat's output, in the oracle CSV's column order: `lr_probs`
 /// and `cellchat_pvals` are `_cellchat`'s magnitude and specificity, and the
@@ -486,6 +514,128 @@ pub fn run_geometric_mean(
         |ligand, receptor| ((ligand.ln() + receptor.ln()) / 2.0).exp(),
     );
     Ok(frame.finish(&magnitudes, specificities))
+}
+
+/// The connectome run: `expr_prod` = the two subunit means' `f32` product and
+/// `scaled_weight` = the two `*_zscores`' `f64` mean
+/// (`method/sc/_connectome.py:17-38`), sorted by `expr_prod` descending
+/// (`magnitude_ascending=False`).
+///
+/// `seed`/`n_perms` do not exist for connectome — `permute=False`, so the run
+/// has no nulls at all (the p-value columns the oracle CSV lacks).
+pub fn run_connectome(
+    adata: &Adata,
+    resource: &[LrPair],
+    expr_prop: f64,
+    min_cells: usize,
+    _seed: u64,
+    _n_perms: usize,
+) -> Result<Vec<Row>> {
+    let frame = frame(adata, resource, expr_prop, min_cells, false)?;
+    let zscores = scale_zscores(&frame.prep);
+    let n_vars = frame.prep.n_vars();
+
+    let mut scored: Vec<(f32, Row)> = Vec::with_capacity(frame.rows.len());
+    for row in &frame.rows {
+        let exploded = &frame.subunits[row.subunit];
+        let ligand = gene_index(&frame.prep, &exploded.ligand, "ligand")?;
+        let receptor = gene_index(&frame.prep, &exploded.receptor, "receptor")?;
+        let ligand_zscores = zscores[row.source * n_vars + ligand];
+        let receptor_zscores = zscores[row.target * n_vars + receptor];
+        let magnitude = row.ligand_means * row.receptor_means;
+        scored.push((
+            magnitude,
+            Row {
+                cells: vec![
+                    exploded.ligand.clone(),
+                    exploded.ligand_complex.clone(),
+                    row.ligand_means.to_string(),
+                    row.ligand_props.to_string(),
+                    ligand_zscores.to_string(),
+                    exploded.receptor.clone(),
+                    exploded.receptor_complex.clone(),
+                    row.receptor_means.to_string(),
+                    row.receptor_props.to_string(),
+                    receptor_zscores.to_string(),
+                    frame.prep.labels[row.source].clone(),
+                    frame.prep.labels[row.target].clone(),
+                    magnitude.to_string(),
+                    ((ligand_zscores + receptor_zscores) / 2.0).to_string(),
+                ],
+            },
+        ));
+    }
+    scored
+        .sort_by(|(left, _), (right, _)| right.partial_cmp(left).expect("expr_prod is never NaN"));
+    Ok(scored.into_iter().map(|(_, row)| row).collect())
+}
+
+/// The `*_zscores` table `_get_lr` builds for connectome: `sc.pp.scale` over
+/// the prepared matrix, then each label's dense column means
+/// (`_liana_pipe.py:494, 538`), `labels.len() * var_names.len()` row-major.
+///
+/// `sc.pp.scale` standardizes each column with `fast_array_utils`'
+/// `mean_var` (`stats/_mean_var.py`, `correction=1`): `f64` accumulators, the
+/// variance as `E[x²] − mean²` with each square taken in `f32` first, then
+/// `(x − mean) / std` in `f64` (`zero_center` densifies) and zero `std`s
+/// replaced by `1` (`scanpy/preprocessing/_scale.py`). The per-label means are
+/// `np.mean(axis=0)` of that dense layer — sequential `f64` accumulation,
+/// then one division.
+fn scale_zscores(prep: &Prep) -> Vec<f64> {
+    let n_vars = prep.n_vars();
+    let n_rows = prep.x.n_rows;
+
+    let mut sums = vec![0.0f64; n_vars];
+    let mut squares = vec![0.0f64; n_vars];
+    for row in 0..n_rows {
+        let range = prep.x.indptr[row]..prep.x.indptr[row + 1];
+        for (&gene, &value) in prep.x.indices[range.clone()]
+            .iter()
+            .zip(&prep.x.data[range])
+        {
+            sums[gene as usize] += f64::from(value);
+            squares[gene as usize] += f64::from(value * value);
+        }
+    }
+    let rows = n_rows as f64;
+    let mut mean = vec![0.0f64; n_vars];
+    let mut std = vec![0.0f64; n_vars];
+    for gene in 0..n_vars {
+        mean[gene] = sums[gene] / rows;
+        let mut var = squares[gene] / rows - mean[gene] * mean[gene];
+        var *= rows / (rows - 1.0);
+        let deviation = var.sqrt();
+        std[gene] = if deviation == 0.0 { 1.0 } else { deviation };
+    }
+
+    // The scaled layer's per-label column means, accumulated over each label's
+    // cells in row order; a row without a stored entry contributes the dense
+    // layer's own `(0 - mean) / std`.
+    let mut out = vec![0.0f64; prep.n_labels() * n_vars];
+    for row in 0..n_rows {
+        let base = prep.cell_cluster[row] as usize * n_vars;
+        let range = prep.x.indptr[row]..prep.x.indptr[row + 1];
+        let (columns, values) = (&prep.x.indices[range.clone()], &prep.x.data[range]);
+        let mut next = 0;
+        for gene in 0..n_vars {
+            let value = if next < columns.len() && columns[next] as usize == gene {
+                let value = f64::from(values[next]);
+                next += 1;
+                value
+            } else {
+                0.0
+            };
+            out[base + gene] += (value - mean[gene]) / std[gene];
+        }
+    }
+    for cluster in 0..prep.n_labels() {
+        let base = cluster * n_vars;
+        let cells = prep.counts[cluster] as f64;
+        for gene in 0..n_vars {
+            out[base + gene] /= cells;
+        }
+    }
+    out
 }
 
 /// `_filter_reassemble_complexes` (`liana/resource/_reassemble_complexes.py:11-87`):
