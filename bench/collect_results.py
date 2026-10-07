@@ -418,8 +418,12 @@ def markdown(doc):
           f"of {len(imports)} | {fmt_mb(imports[0]['rss_kb'])} |")
     a("")
     a("The recorded baseline for the import was **1.78 s** (`p0a/logs/startup.log`); the")
-    a("binary starts in under a millisecond and finishes a complete 1k-cell method run in")
-    a("less wall clock than the Python import alone.")
+    a("binary starts in under a millisecond.")
+    if first and first["elapsed_s"] and imports:
+        best = min(r["elapsed_s"] for r in imports)
+        cmp_ = "less" if first["elapsed_s"] < best else "more"
+        a(f"A whole 1k-cell method run ({fmt_s(first['elapsed_s'])} s) takes {cmp_} wall clock")
+        a(f"than one Python import of the stack ({best:.2f} s).")
     a("")
 
     # ---- T5
