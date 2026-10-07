@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use liana_core::io::{Adata, read_h5ad};
 use liana_core::pipe::{
     CONNECTOME_CSV_HEADER, CPDB_CSV_HEADER, GMEAN_CSV_HEADER, LOGFC_CSV_HEADER, LrRow,
-    NATMI_CSV_HEADER, run_cellphonedb, run_connectome, run_geometric_mean, run_logfc, run_natmi,
+    NATMI_CSV_HEADER, SCSEQCOMM_CSV_HEADER, run_cellphonedb, run_connectome, run_geometric_mean,
+    run_logfc, run_natmi, run_scseqcomm,
 };
 use liana_core::resource::{self, LrPair};
 use serde::Deserialize;
@@ -51,6 +52,7 @@ enum Method {
     Connectome,
     Logfc,
     Natmi,
+    Scseqcomm,
 }
 
 impl Method {
@@ -61,6 +63,7 @@ impl Method {
             Method::Connectome => "connectome",
             Method::Logfc => "logfc",
             Method::Natmi => "natmi",
+            Method::Scseqcomm => "scseqcomm",
         }
     }
 
@@ -73,6 +76,7 @@ impl Method {
             Method::Connectome => "connectome",
             Method::Logfc => "logfc",
             Method::Natmi => "natmi",
+            Method::Scseqcomm => "scseqcomm",
         }
     }
 
@@ -83,6 +87,7 @@ impl Method {
             Method::Connectome => CONNECTOME_CSV_HEADER,
             Method::Logfc => LOGFC_CSV_HEADER,
             Method::Natmi => NATMI_CSV_HEADER,
+            Method::Scseqcomm => SCSEQCOMM_CSV_HEADER,
         }
     }
 
@@ -118,6 +123,12 @@ impl Method {
                 .into_iter()
                 .map(|row| row.cells)
                 .collect(),
+            Method::Scseqcomm => {
+                run_scseqcomm(adata, resource, expr_prop, min_cells, seed, n_perms)?
+                    .into_iter()
+                    .map(|row| row.cells)
+                    .collect()
+            }
         })
     }
 }
@@ -182,6 +193,11 @@ fn logfc_pipeline_matches_the_oracle_csv() {
 #[test]
 fn natmi_pipeline_matches_the_oracle_csv() {
     run_and_compare(Method::Natmi);
+}
+
+#[test]
+fn scseqcomm_pipeline_matches_the_oracle_csv() {
+    run_and_compare(Method::Scseqcomm);
 }
 
 fn run_and_compare(method: Method) {
@@ -331,7 +347,7 @@ fn equal_field(column: &str, expected: &str, actual: &str) -> bool {
         }
         "ligand_props" | "receptor_props" | "cellphone_pvals" | "gmean_pvals"
         | "ligand_zscores" | "receptor_zscores" | "scaled_weight" | "ligand_logfc"
-        | "receptor_logfc" | "lr_logfc" => {
+        | "receptor_logfc" | "lr_logfc" | "ligand_cdf" | "receptor_cdf" | "inter_score" => {
             expected.parse::<f64>().unwrap().to_bits() == actual.parse::<f64>().unwrap().to_bits()
         }
         _ => expected == actual,

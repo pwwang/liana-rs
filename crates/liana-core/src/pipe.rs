@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Result, bail};
 
 use crate::io::Adata;
+use crate::math::{ndtr, std_f32, sum_f32};
 use crate::perms::engine::{self, Aggregation, RowSel};
 use crate::perms::null::gmean32;
 use crate::perms::trimean;
@@ -51,6 +52,11 @@ pub const LOGFC_CSV_HEADER: &str = "ligand,ligand_complex,ligand_logfc,ligand_me
 pub const NATMI_CSV_HEADER: &str = "ligand,ligand_complex,ligand_means,ligand_means_sums,ligand_props,\
                                    receptor,receptor_complex,receptor_means,receptor_means_sums,\
                                    receptor_props,source,target,expr_prod,spec_weight";
+
+/// The oracle CSV header of [`run_scseqcomm`]'s rows.
+pub const SCSEQCOMM_CSV_HEADER: &str = "ligand,ligand_cdf,ligand_complex,ligand_means,ligand_props,\
+                                        receptor,receptor_cdf,receptor_complex,receptor_means,\
+                                        receptor_props,source,target,inter_score";
 
 /// One row of a non-permutation method's output: every cell as the oracle CSV
 /// writes it, in the oracle's column order — the frame's columns as
@@ -677,6 +683,126 @@ pub fn run_natmi(
     scored
         .sort_by(|(left, _), (right, _)| right.partial_cmp(left).expect("expr_prod is never NaN"));
     Ok(scored.into_iter().map(|(_, row)| row).collect())
+}
+
+/// The scseqcomm run: `*_cdf` = the cluster's standard normal CDF at each
+/// subunit's mean — `_gene_cdf` (`_liana_pipe.py:755-767`), zeroed where the
+/// mean is zero — and `inter_score` = the pair-wise minimum of the two
+/// (`method/sc/_scseqcomm.py:6-24`, its magnitude, descending).
+/// `seed`/`n_perms` do not exist for it (`permute=False`).
+///
+/// The `z` is `(gene_mean − cluster_mean) / (cluster_std / sqrt(counts))`:
+/// both means are the frame's `f32` columns, so the subtraction is `f32`;
+/// the `std`/`counts` promotion to `f64` and the division are `f64`, as is
+/// scipy's `norm.cdf` behind it (`_cluster_stats` and `_gene_cdf`,
+/// `_liana_pipe.py:742-767`).
+pub fn run_scseqcomm(
+    adata: &Adata,
+    resource: &[LrPair],
+    expr_prop: f64,
+    min_cells: usize,
+    _seed: u64,
+    _n_perms: usize,
+) -> Result<Vec<Row>> {
+    let frame = frame(adata, resource, expr_prop, min_cells, false)?;
+    let (cluster_means, cluster_stds) = cluster_stats(&frame.prep);
+
+    let mut scored: Vec<(f64, Row)> = Vec::with_capacity(frame.rows.len());
+    for row in &frame.rows {
+        let exploded = &frame.subunits[row.subunit];
+        let ligand_cdf = gene_cdf(
+            row.ligand_means,
+            cluster_means[row.source],
+            cluster_stds[row.source],
+            frame.prep.counts[row.source],
+        );
+        let receptor_cdf = gene_cdf(
+            row.receptor_means,
+            cluster_means[row.target],
+            cluster_stds[row.target],
+            frame.prep.counts[row.target],
+        );
+        let inter_score = ligand_cdf.min(receptor_cdf);
+        scored.push((
+            inter_score,
+            Row {
+                cells: vec![
+                    exploded.ligand.clone(),
+                    ligand_cdf.to_string(),
+                    exploded.ligand_complex.clone(),
+                    row.ligand_means.to_string(),
+                    row.ligand_props.to_string(),
+                    exploded.receptor.clone(),
+                    receptor_cdf.to_string(),
+                    exploded.receptor_complex.clone(),
+                    row.receptor_means.to_string(),
+                    row.receptor_props.to_string(),
+                    frame.prep.labels[row.source].clone(),
+                    frame.prep.labels[row.target].clone(),
+                    inter_score.to_string(),
+                ],
+            },
+        ));
+    }
+    scored.sort_by(|(left, _), (right, _)| {
+        right.partial_cmp(left).expect("inter_score is never NaN")
+    });
+    Ok(scored.into_iter().map(|(_, row)| row).collect())
+}
+
+/// `_cluster_stats` (`_liana_pipe.py:742-751`): each cluster's scalar mean
+/// and standard deviation over the prepared matrix, both `f32`.
+///
+/// The mean is scipy's sparse `mean(axis=None)`: every stored value scaled by
+/// `1 / (cells * vars)` in `f32`, accumulated in numpy's pairwise order over
+/// the rows. The deviation is `np.std` of the cluster's *dense* block — the
+/// implicit zeros included, flattened row-major — which is numpy's `f32`
+/// pairwise mean and squared-deviation sum (`math::pairwise`).
+fn cluster_stats(prep: &Prep) -> (Vec<f32>, Vec<f32>) {
+    let n_vars = prep.n_vars();
+    let mut means = vec![0.0f32; prep.n_labels()];
+    let mut stds = vec![0.0f32; prep.n_labels()];
+    for cluster in 0..prep.n_labels() {
+        let scale = (1.0f64 / (prep.counts[cluster] * n_vars) as f64) as f32;
+        let mut scaled = Vec::new();
+        let mut dense = Vec::with_capacity(prep.counts[cluster] * n_vars);
+        for row in 0..prep.x.n_rows {
+            if prep.cell_cluster[row] as usize != cluster {
+                continue;
+            }
+            let range = prep.x.indptr[row]..prep.x.indptr[row + 1];
+            let (columns, values) = (&prep.x.indices[range.clone()], &prep.x.data[range]);
+            let mut next = 0;
+            for gene in 0..n_vars {
+                let value = if next < columns.len() && columns[next] as usize == gene {
+                    let value = values[next];
+                    next += 1;
+                    scaled.push(value * scale);
+                    value
+                } else {
+                    0.0
+                };
+                dense.push(value);
+            }
+        }
+        means[cluster] = sum_f32(&scaled);
+        stds[cluster] = std_f32(&dense);
+    }
+    (means, stds)
+}
+
+/// `_gene_cdf` (`_liana_pipe.py:755-767`): `norm.cdf(gene_mean, loc=cluster_mean,
+/// scale=cluster_std / sqrt(cluster_counts))`, with `probability[gene_mean == 0] = 0`.
+///
+/// The two means are `f32`, so their difference is `f32`; the scale promotes
+/// to `f64` (`f32 / int` in numpy is `f64`) and the division and CDF are
+/// `f64` — scipy's `ndtr` (`math::ndtr`).
+fn gene_cdf(gene_mean: f32, cluster_mean: f32, cluster_std: f32, counts: usize) -> f64 {
+    if gene_mean == 0.0 {
+        return 0.0;
+    }
+    let scale = f64::from(cluster_std) / (counts as f64).sqrt();
+    ndtr(f64::from(gene_mean - cluster_mean) / scale)
 }
 
 /// The side of the pair a `_sum_means` pass totals — the ligand pass groups
