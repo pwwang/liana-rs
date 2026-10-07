@@ -2,6 +2,13 @@
 
 Rust reimplementation of the single-cell path of [LIANA+](https://github.com/scverse/liana), targeting bit-exact parity with liana 2.0.0 (tag `V2.0.0`, commit `c59472ccc9de8360dbbf5016db75f8abde08dd3e`) while removing its memory ceiling.
 
+## Install
+
+Toolchain requirements (edition 2024, bundled static HDF5, cmake + C compiler)
+and a verified install path for each surface — the `liana-rs` binary, the
+`liana_rs` Python wheel, and `liana-core` as a git dependency — are in
+[docs/INSTALL.md](docs/INSTALL.md). Nothing is published on crates.io or PyPI.
+
 ## Usage
 
 One call runs one method over one `.h5ad` and writes liana's result table — the
