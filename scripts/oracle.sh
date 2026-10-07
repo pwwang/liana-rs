@@ -4,7 +4,12 @@
 # Regenerates expected outputs from the pinned Python oracle — liana 2.0.0
 # (V2.0.0, commit c59472ccc9de8360dbbf5016db75f8abde08dd3e) — for every *input*
 # fixture in testdata/fixtures/, for the single-cell methods
-# {cellphonedb, geometric_mean, rank_aggregate} x n_perms {100, 1000}, seed 1337.
+# {cellphonedb, geometric_mean, cellchat, connectome, logfc, natmi,
+# singlecellsignalr, scseqcomm, rank_aggregate} x n_perms {100, 1000}, seed 1337.
+#
+# The five ported-in-W5a methods are all `permute=False`, so their two `p<N>`
+# rows are identical by construction; both are written to keep the
+# `<fixture>__<method>__p<N>` naming uniform.
 #
 # Writes testdata/expected/<fixture>__<method>__p<N>.csv
 #    and testdata/expected/<fixture>__<method>__p<N>.meta.json
@@ -53,7 +58,17 @@ PINNED_COMMIT = "c59472ccc9de8360dbbf5016db75f8abde08dd3e"
 FIXTURES = {
     "synthetic.h5ad": {"groupby": "cell_type", "resource": "toy_all_pairs"},
 }
-METHODS = ["cellphonedb", "geometric_mean", "cellchat", "rank_aggregate"]
+METHODS = [
+    "cellphonedb",
+    "geometric_mean",
+    "cellchat",
+    "connectome",
+    "logfc",
+    "natmi",
+    "singlecellsignalr",
+    "scseqcomm",
+    "rank_aggregate",
+]
 N_PERMS = [100, 1000]
 SEED = 1337
 N_JOBS = 1  # single-threaded: keeps permutation results reproducible

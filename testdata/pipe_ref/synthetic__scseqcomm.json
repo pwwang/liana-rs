@@ -1,0 +1,180 @@
+{
+  "liana_version": "2.0.0",
+  "liana_commit": "c59472ccc9de8360dbbf5016db75f8abde08dd3e",
+  "numpy_version": "2.5.3",
+  "adata": "testdata/fixtures/synthetic.h5ad",
+  "adata_sha256": "029d7de8019bf50203394f22f0d70adfa1ef890f2a752040a1766d85037a27e5",
+  "resource": "testdata/expected/synthetic__resource.csv",
+  "resource_sha256": "fb6f5272b2e07b984355faad9dc184535de54019c253c6a343231b48740f0843",
+  "groupby": "cell_type",
+  "expr_prop": 0.05,
+  "min_cells": 5,
+  "method": "scseqcomm",
+  "prep": {
+    "n_obs": 4205,
+    "n_vars": 11,
+    "var_names": [
+      "ECM",
+      "ligA",
+      "ligB",
+      "ligC",
+      "ligD",
+      "prodA",
+      "prodB",
+      "prodC",
+      "prodD",
+      "protE",
+      "protF"
+    ],
+    "labels": [
+      "A",
+      "B"
+    ],
+    "counts": {
+      "A": 2088,
+      "B": 2117
+    },
+    "means": {
+      "A": {
+        "ECM": 0.279649019241333,
+        "ligA": 0.19938313961029053,
+        "ligB": 0.04502035677433014,
+        "ligC": 0.40631529688835144,
+        "ligD": 0.2502322196960449,
+        "prodA": 0.07829266041517258,
+        "prodB": 0.03096204251050949,
+        "prodC": 0.15732251107692719,
+        "prodD": 0.0983305424451828,
+        "protE": 0.5501152873039246,
+        "protF": 0.48174819350242615
+      },
+      "B": {
+        "ECM": 0.27872100472450256,
+        "ligA": 0.19652047753334045,
+        "ligB": 0.04483529180288315,
+        "ligC": 0.39879342913627625,
+        "ligD": 0.2471107393503189,
+        "prodA": 0.07535211741924286,
+        "prodB": 0.02961762808263302,
+        "prodC": 0.1580226719379425,
+        "prodD": 0.09452059864997864,
+        "protE": 0.5188592076301575,
+        "protF": 0.4717308580875397
+      }
+    },
+    "props": {
+      "A": {
+        "ECM": 1.0,
+        "ligA": 1.0,
+        "ligB": 1.0,
+        "ligC": 1.0,
+        "ligD": 1.0,
+        "prodA": 0.19827586206896552,
+        "prodB": 0.289272030651341,
+        "prodC": 0.31513409961685823,
+        "prodD": 0.19827586206896552,
+        "protE": 0.3955938697318008,
+        "protF": 1.0
+      },
+      "B": {
+        "ECM": 1.0,
+        "ligA": 1.0,
+        "ligB": 1.0,
+        "ligC": 1.0,
+        "ligD": 1.0,
+        "prodA": 0.19036372224846482,
+        "prodB": 0.2990080302314596,
+        "prodC": 0.31459612659423714,
+        "prodD": 0.19036372224846482,
+        "protE": 0.38639584317430326,
+        "protF": 1.0
+      }
+    },
+    "sha256_means_bits": "24483ab7f6d0bf76d3febae6ca82d5751e8a30b9593b208a239880dfaee9d21a",
+    "sha256_props_bits": "0d2a947ca98421309c429c054dc54903993f10032f6978acea5f5e9727fce97f"
+  },
+  "lr_rows": {
+    "n_rows": 440,
+    "columns": [
+      "ligand",
+      "ligand_complex",
+      "ligand_means",
+      "ligand_props",
+      "receptor",
+      "receptor_complex",
+      "receptor_means",
+      "receptor_props",
+      "source",
+      "target",
+      "ligand_cdf",
+      "receptor_cdf"
+    ],
+    "sha256_keys": "605ef2fd64d29ef21218e9c3181d490753958bc907974b415e51549bb20c82cd",
+    "sha256_columns_bits": {
+      "ligand_means": "2af631abcdf1293987072af570d8c2ba8ed3a1b17ec0aa53746741af7d934a1b",
+      "ligand_props": "4dcca50f572443783a6e7661ffb74b1863de59ef3dbd3bbde9984d7f7e531de3",
+      "receptor_means": "79a2d375c0936dcf0ff0cf940759e1bd0077427193d60ad2338347a4b261736f",
+      "receptor_props": "8ea8762046ee23beef2615eee6e8be492cf50b69e7cdca1a54484b3e21b2b877",
+      "ligand_cdf": "b27067d0353d568d4c42d9fed3bfa5824c83e0e72ff50fb9a4209b2cb99a1c8a",
+      "receptor_cdf": "4efc8b7298229c2abbc6e8d1244ff29a756decd1c04c0bd8d603f99a76080fbb"
+    }
+  },
+  "n_perms": {
+    "100": {
+      "seed": 1337,
+      "n_perms": 100,
+      "columns": [
+        "ligand",
+        "ligand_cdf",
+        "ligand_complex",
+        "ligand_means",
+        "ligand_props",
+        "receptor",
+        "receptor_cdf",
+        "receptor_complex",
+        "receptor_means",
+        "receptor_props",
+        "source",
+        "target",
+        "inter_score"
+      ],
+      "sha256_columns_bits": {
+        "ligand_cdf": "f3e375203582a544a97380ac9333a8e349fc76a3fa144beaef24301519fc1671",
+        "ligand_means": "2d5da93a8ea1bcbfb7d0e876f1012d86da7c7ad5e96c83b9e5d1632a8b84039d",
+        "ligand_props": "343bd90852a7811d59c12ed46c2f1d94dfbff3fcd4f75e51d11dd93e8796a144",
+        "receptor_cdf": "5b27da32cf2802d059d84d79793a7d1c3120f908236db297eddc570ecad9f6d5",
+        "receptor_means": "3f9d3005707920bfd02512620e9e7308cefd41fbc0e0187aff77671480440d51",
+        "receptor_props": "ca050845b3a65295a68ae46813baf0d8da82712f027b4ee1e8040abba2036324",
+        "inter_score": "24fdd5f24d400efb0edbd3226c4959a8e8813df75070434ba6d1c38f023da125"
+      }
+    },
+    "1000": {
+      "seed": 1337,
+      "n_perms": 1000,
+      "columns": [
+        "ligand",
+        "ligand_cdf",
+        "ligand_complex",
+        "ligand_means",
+        "ligand_props",
+        "receptor",
+        "receptor_cdf",
+        "receptor_complex",
+        "receptor_means",
+        "receptor_props",
+        "source",
+        "target",
+        "inter_score"
+      ],
+      "sha256_columns_bits": {
+        "ligand_cdf": "f3e375203582a544a97380ac9333a8e349fc76a3fa144beaef24301519fc1671",
+        "ligand_means": "2d5da93a8ea1bcbfb7d0e876f1012d86da7c7ad5e96c83b9e5d1632a8b84039d",
+        "ligand_props": "343bd90852a7811d59c12ed46c2f1d94dfbff3fcd4f75e51d11dd93e8796a144",
+        "receptor_cdf": "5b27da32cf2802d059d84d79793a7d1c3120f908236db297eddc570ecad9f6d5",
+        "receptor_means": "3f9d3005707920bfd02512620e9e7308cefd41fbc0e0187aff77671480440d51",
+        "receptor_props": "ca050845b3a65295a68ae46813baf0d8da82712f027b4ee1e8040abba2036324",
+        "inter_score": "24fdd5f24d400efb0edbd3226c4959a8e8813df75070434ba6d1c38f023da125"
+      }
+    }
+  }
+}

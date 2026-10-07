@@ -3,9 +3,10 @@
 
 Runs liana's own `_prepare_lr_stats` and `_run_method` (the two halves of
 `liana_pipe`) on `synthetic.h5ad` against the toy resource, for the
-`cellphonedb` (mean aggregation) and `cellchat` (trimean aggregation) methods,
-then records the stages a Rust port has to reproduce *between* the fixture and
-the oracle CSV:
+`cellphonedb` (mean aggregation), `cellchat` (trimean aggregation) and the five
+non-permutation methods — `connectome`, `logfc`, `natmi`,
+`singlecellsignalr`, `scseqcomm` — then records the stages a Rust port has to
+reproduce *between* the fixture and the oracle CSV:
 
     prep      per-cluster per-gene `means` (f32) / `props` (f64) / `trimean`
               (f64, cellchat), the prepared var order and the label counts
@@ -20,8 +21,7 @@ sha256 over the big-endian IEEE-754 bit patterns
 (`sha256_{means,lr_means,pvals,cube}_bits`) so the test pins the arithmetic,
 not a rounded decimal.
 
-Writes `testdata/pipe_ref/synthetic__cellphonedb.json` and
-`testdata/pipe_ref/synthetic__cellchat.json`.
+Writes `testdata/pipe_ref/synthetic__<method>.json` for all seven methods.
 
 Run with the oracle venv interpreter (liana 2.0.0):
 
@@ -52,6 +52,7 @@ from liana._core._pipe_utils._get_mean_perms import (
     _get_means_perms,
     _trimean,
 )
+from liana.method.sc import connectome, logfc, natmi, scseqcomm, singlecellsignalr
 from liana.method.sc._cellchat import _cellchat, _lr_probability
 from liana.method.sc._cellphonedb import _cellphonedb
 from liana.method.sc._liana_pipe import _prepare_lr_stats, _run_method, _sort_by_score
@@ -75,6 +76,21 @@ KEY_COLS = [P.source, P.target, P.ligand_complex, P.receptor_complex]
 # means, and `mat_max` joins the frame.
 CHAT_COMPLEX_COLS = _cellchat.complex_cols
 CHAT_ADD_COLS = _cellchat.add_cols + ["ligand", "receptor", "ligand_props", "receptor_props"]
+
+# `_SUBUNIT_COLS` (`_liana_pipe.py:38`): the per-entity columns `liana_pipe`
+# appends to every method's `add_cols`.
+SUBUNIT_COLS = [P.ligand, P.receptor, C.ligand_props, C.receptor_props]
+
+# The five non-permutation methods of W5a: the oracle's own `li.mt.<name>`
+# entry point, whose metadata (`complex_cols`/`add_cols` and score column
+# names) drives the reconstruction below.
+SIMPLE_METHODS = [
+    ("connectome", connectome),
+    ("logfc", logfc),
+    ("natmi", natmi),
+    ("singlecellsignalr", singlecellsignalr),
+    ("scseqcomm", scseqcomm),
+]
 
 
 def bits(value: float, fmt: str) -> str:
@@ -269,7 +285,153 @@ def main() -> int:
         )
 
     dump_cellchat(version, commit)
+    for name, method in SIMPLE_METHODS:
+        dump_simple(version, commit, name, method)
     return 0
+
+
+def numeric_col_shas(frame: pd.DataFrame) -> dict[str, str]:
+    """sha256 over the bit patterns of every `f32`/`f64` column, by name."""
+    shas = {}
+    for col in frame.columns:
+        values = frame[col].to_numpy()
+        if values.dtype == np.float32:
+            shas[str(col)] = f32_bits_stream(values)
+        elif values.dtype == np.float64:
+            shas[str(col)] = f64_bits_stream(values)
+    return shas
+
+
+def dump_simple(version: str, commit: str, name: str, method) -> None:
+    """The non-permutation half: the five W5a methods, one dump each.
+
+    Same two halves as the cellphonedb dump — `_prepare_lr_stats` for the
+    frame, `_run_method` + `_sort_by_score` for the score columns — with the
+    method's own `complex_cols`/`add_cols`. The reconstructed frame is asserted
+    equal to `li.mt.<name>`'s output, so a drifted reconstruction of the call
+    path fails here rather than silently pinning the wrong oracle. `n_perms`
+    is dumped for both values (the run is non-permutation, so the two entries
+    are identical by construction) and pins every numeric column of the scored
+    frame by its bit patterns.
+    """
+    adata_in = ad.read_h5ad(ADATA_PATH)
+    toy = pd.read_csv(TOY_PATH)
+    complex_cols = method.complex_cols
+    add_cols = method.add_cols + SUBUNIT_COLS
+
+    adata, lr_res = _prepare_lr_stats(
+        adata=adata_in,
+        groupby=GROUPBY,
+        resource_name="consensus",
+        resource=toy,
+        interactions=None,
+        groupby_pairs=None,
+        min_cells=V.min_cells,
+        base=V.logbase,
+        de_method=V.de_method,
+        verbose=False,
+        use_raw=False,
+        layer=None,
+        complex_cols=complex_cols,
+        add_cols=add_cols,
+        spatial_key=None,
+        spatial_kwargs=None,
+        mdata_kwargs={},
+    )
+    obs = get_obs(adata)
+    labels = [str(label) for label in obs["@label"].cat.categories]
+    var_names = [str(name_) for name_ in adata.var_names]
+    counts = {label: int(np.sum(obs["@label"] == label)) for label in labels}
+
+    means: dict[str, dict[str, float]] = {}
+    props: dict[str, dict[str, float]] = {}
+    for label in labels:
+        temp = adata[obs["@label"] == label, :]
+        dense = get_x(temp).mean(axis=0)
+        means[label] = {name_: num(v) for name_, v in zip(var_names, np.asarray(dense).ravel())}
+        props[label] = {name_: num(v) for name_, v in zip(var_names, get_x(temp).getnnz(axis=0) / temp.shape[0])}
+
+    per_n_perms: dict[str, dict] = {}
+    for n_perms in N_PERMS:
+        scored = _sort_by_score(
+            _run_method(
+                lr_res=lr_res.copy(),
+                adata=adata,
+                groupby=GROUPBY,
+                expr_prop=V.expr_prop,
+                _score=method,
+                _key_cols=P.primary,
+                _complex_cols=complex_cols,
+                _add_cols=add_cols,
+                n_perms=n_perms,
+                seed=SEED,
+                return_all_lrs=False,
+                n_jobs=1,
+                verbose=False,
+            ),
+            method,
+        )
+        direct = getattr(li.mt, name)(
+            adata_in,
+            groupby=GROUPBY,
+            resource=toy,
+            n_perms=n_perms,
+            seed=SEED,
+            n_jobs=1,
+            inplace=False,
+            verbose=False,
+        )
+        pd.testing.assert_frame_equal(scored, direct)
+
+        per_n_perms[str(n_perms)] = {
+            "seed": SEED,
+            "n_perms": n_perms,
+            "columns": [str(col) for col in scored.columns],
+            "sha256_columns_bits": numeric_col_shas(scored),
+        }
+
+    payload = {
+        "liana_version": version,
+        "liana_commit": commit,
+        "numpy_version": np.__version__,
+        "adata": str(ADATA_PATH.relative_to(REPO_ROOT)),
+        "adata_sha256": hashlib.sha256(ADATA_PATH.read_bytes()).hexdigest(),
+        "resource": str(TOY_PATH.relative_to(REPO_ROOT)),
+        "resource_sha256": hashlib.sha256(TOY_PATH.read_bytes()).hexdigest(),
+        "groupby": GROUPBY,
+        "expr_prop": V.expr_prop,
+        "min_cells": V.min_cells,
+        "method": name,
+        "prep": {
+            "n_obs": int(adata.n_obs),
+            "n_vars": int(adata.n_vars),
+            "var_names": var_names,
+            "labels": labels,
+            "counts": counts,
+            "means": means,
+            "props": props,
+            "sha256_means_bits": f32_bits_stream(v for label in labels for v in means[label].values()),
+            "sha256_props_bits": f64_bits_stream(v for label in labels for v in props[label].values()),
+        },
+        "lr_rows": {
+            "n_rows": int(len(lr_res)),
+            "columns": [str(col) for col in lr_res.columns],
+            "sha256_keys": sha256_stream(
+                f"{s}\t{t}\t{lc}\t{rc}\n"
+                for s, t, lc, rc in zip(lr_res[P.source], lr_res[P.target], lr_res[P.ligand_complex], lr_res[P.receptor_complex], strict=True)
+            ),
+            "sha256_columns_bits": numeric_col_shas(lr_res),
+        },
+        "n_perms": per_n_perms,
+    }
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    (OUT_DIR / f"synthetic__{name}.json").write_text(json.dumps(payload, indent=2) + "\n")
+
+    scores = [col for col in (method.magnitude, method.specificity) if col is not None]
+    print(
+        f"  {name:<18} rows={len(lr_res)} labels={labels} scores={scores}"
+        f" p100={per_n_perms['100']['sha256_columns_bits'][scores[0]][:16]}"
+    )
 
 
 def dump_cellchat(version: str, commit: str) -> None:
