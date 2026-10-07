@@ -1551,6 +1551,7 @@ dependencies = [
  "anndata",
  "anndata-hdf5",
  "anyhow",
+ "hdf5-metno",
  "ndarray",
  "polars",
  "rand 0.10.3",

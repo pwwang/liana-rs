@@ -19,5 +19,8 @@ serde_json = "1"
 sha2 = "0.10"
 anndata = "0.7"
 anndata-hdf5 = "0.5"
+# `static` builds the bundled HDF5 C library (needs cmake + a C compiler); it is
+# the same feature set `anndata-hdf5` requests, so both unify on one build.
+hdf5-metno = { version = "0.12", features = ["static"] }
 polars = "0.53"
 ndarray = "0.17"
