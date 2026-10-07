@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 use liana_core::io::{Adata, read_h5ad};
 use liana_core::pipe::{
     CONNECTOME_CSV_HEADER, CPDB_CSV_HEADER, GMEAN_CSV_HEADER, LOGFC_CSV_HEADER, LrRow,
-    NATMI_CSV_HEADER, SCSEQCOMM_CSV_HEADER, SINGLECELLSIGNALR_CSV_HEADER, run_cellphonedb,
-    run_connectome, run_geometric_mean, run_logfc, run_natmi, run_scseqcomm, run_singlecellsignalr,
+    NATMI_CSV_HEADER, RANK_AGGREGATE_CSV_HEADER, SCSEQCOMM_CSV_HEADER,
+    SINGLECELLSIGNALR_CSV_HEADER, run_cellphonedb, run_connectome, run_geometric_mean, run_logfc,
+    run_natmi, run_rank_aggregate, run_scseqcomm, run_singlecellsignalr,
 };
 use liana_core::resource::{self, LrPair};
 use serde::Deserialize;
@@ -54,6 +55,7 @@ enum Method {
     Natmi,
     Scseqcomm,
     Singlecellsignalr,
+    RankAggregate,
 }
 
 impl Method {
@@ -66,12 +68,16 @@ impl Method {
             Method::Natmi => "natmi",
             Method::Scseqcomm => "scseqcomm",
             Method::Singlecellsignalr => "singlecellsignalr",
+            Method::RankAggregate => "rank_aggregate",
         }
     }
 
     /// The `scripts/dump_pipe_ref.py` dump whose frame this method's run
     /// shares — the whole `lr_res` frame is common, only the score columns
     /// differ, so geometric_mean is pinned by the cellphonedb dump.
+    ///
+    /// `rank_aggregate` gets its own dump: the joined frame's columns and
+    /// both consensus options' intermediates are aggregate-specific pins.
     fn dump(self) -> &'static str {
         match self {
             Method::Cellphonedb | Method::GeometricMean => "cellphonedb",
@@ -80,6 +86,7 @@ impl Method {
             Method::Natmi => "natmi",
             Method::Scseqcomm => "scseqcomm",
             Method::Singlecellsignalr => "singlecellsignalr",
+            Method::RankAggregate => "rank_aggregate",
         }
     }
 
@@ -92,6 +99,7 @@ impl Method {
             Method::Natmi => NATMI_CSV_HEADER,
             Method::Scseqcomm => SCSEQCOMM_CSV_HEADER,
             Method::Singlecellsignalr => SINGLECELLSIGNALR_CSV_HEADER,
+            Method::RankAggregate => RANK_AGGREGATE_CSV_HEADER,
         }
     }
 
@@ -135,6 +143,12 @@ impl Method {
             }
             Method::Singlecellsignalr => {
                 run_singlecellsignalr(adata, resource, expr_prop, min_cells, seed, n_perms)?
+                    .into_iter()
+                    .map(|row| row.cells)
+                    .collect()
+            }
+            Method::RankAggregate => {
+                run_rank_aggregate(adata, resource, expr_prop, min_cells, seed, n_perms)?
                     .into_iter()
                     .map(|row| row.cells)
                     .collect()
@@ -213,6 +227,11 @@ fn scseqcomm_pipeline_matches_the_oracle_csv() {
 #[test]
 fn singlecellsignalr_pipeline_matches_the_oracle_csv() {
     run_and_compare(Method::Singlecellsignalr);
+}
+
+#[test]
+fn rank_aggregate_pipeline_matches_the_oracle_csv() {
+    run_and_compare(Method::RankAggregate);
 }
 
 fn run_and_compare(method: Method) {
@@ -364,7 +383,8 @@ fn equal_field(column: &str, expected: &str, actual: &str) -> bool {
         }
         "ligand_props" | "receptor_props" | "cellphone_pvals" | "gmean_pvals"
         | "ligand_zscores" | "receptor_zscores" | "scaled_weight" | "ligand_logfc"
-        | "receptor_logfc" | "lr_logfc" | "ligand_cdf" | "receptor_cdf" | "inter_score" => {
+        | "receptor_logfc" | "lr_logfc" | "ligand_cdf" | "receptor_cdf" | "inter_score"
+        | "specificity_rank" | "magnitude_rank" => {
             expected.parse::<f64>().unwrap().to_bits() == actual.parse::<f64>().unwrap().to_bits()
         }
         _ => expected == actual,

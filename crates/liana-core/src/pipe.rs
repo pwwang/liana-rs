@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Result, bail};
 
 use crate::io::Adata;
-use crate::math::{ndtr, std_f32, sum_f32};
+use crate::math::{betainc, ndtr, std_f32, sum_f32};
 use crate::perms::engine::{self, Aggregation, RowSel};
 use crate::perms::null::gmean32;
 use crate::perms::trimean;
@@ -64,10 +64,22 @@ pub const SINGLECELLSIGNALR_CSV_HEADER: &str = "ligand,ligand_complex,ligand_mea
                                                mat_mean,receptor,receptor_complex,\
                                                receptor_means,receptor_props,source,target,lrscore";
 
+/// The oracle CSV header of [`run_rank_aggregate`]'s rows — `_aggregate`'s
+/// joined frame (`_core/_pipe_utils/_aggregate.py:75-79`): the four keys, the
+/// payload columns `liana_pipe_consensus`' first method's frame carries, then
+/// one column per distinct score in `methods=` order, then the two consensus
+/// ranks, assigned by `_aggregate`'s two `lr_res[consensus.<option>] = ...`.
+pub const RANK_AGGREGATE_CSV_HEADER: &str = "source,target,ligand_complex,receptor_complex,\
+                                             ligand,receptor,ligand_means,receptor_means,\
+                                             ligand_props,receptor_props,lr_means,cellphone_pvals,\
+                                             expr_prod,scaled_weight,lr_logfc,spec_weight,lrscore,\
+                                             specificity_rank,magnitude_rank";
+
 /// One row of a non-permutation method's output: every cell as the oracle CSV
 /// writes it, in the oracle's column order — the frame's columns as
 /// `np.union1d` alphabetizes them, then the method's score columns, appended by
-/// `_run_method` (`_liana_pipe.py:721-724`).
+/// `_run_method` (`_liana_pipe.py:721-724`); [`run_rank_aggregate`] follows
+/// `_aggregate`'s join order instead.
 ///
 /// Each cell carries Rust's shortest-round-trip `Display`, which parses back —
 /// Python's `float()`, or `str::parse` in the parity test — to the same bits;
@@ -798,6 +810,280 @@ pub fn run_singlecellsignalr(
     }
     scored.sort_by(|(left, _), (right, _)| right.partial_cmp(left).expect("lrscore is never NaN"));
     Ok(scored.into_iter().map(|(_, row)| row).collect())
+}
+
+/// The `rank_aggregate` run for one `n_perms`: every consensus method over one
+/// shared frame (`liana_pipe_consensus`, `method/sc/_liana_pipe.py:411-462`),
+/// joined on the primary keys (`_aggregate`, `_core/_pipe_utils/_aggregate.py:35-99`),
+/// then each consensus option's Robust Rank Aggregation (`_rank_aggregate` +
+/// `_robust_rank_aggregate`, `:102-241`), sorted by `magnitude_rank` ascending
+/// (`sort_values(order_col)`, then `_sort_by_score` with
+/// `magnitude_ascending=True`).
+///
+/// The join is a pure payload merge: every method's reassembled frame carries
+/// the same 440 keys in the same order and `_run_method(..., _aggregate_flag=True)`
+/// narrows each to that key set plus its own scores, so `frames[0].merge(
+/// frame.drop(columns=shared), how="outer")` only appends score columns. The
+/// frame is therefore built once and scored seven ways — `lr_means` /
+/// `cellphone_pvals` (CellPhoneDB, `frames[0]`), `expr_prod` (Connectome and
+/// NATMI's shared product), `scaled_weight`, `lr_logfc`, `spec_weight`,
+/// `lrscore` — matching the oracle CSV's column order.
+///
+/// Deviation, as documented in `ops/logs/w3-report.md` for the other runners:
+/// the oracle's order inside `magnitude_rank` ties comes from pandas' unstable
+/// sort/argsort; this port sorts stably, and the parity gate is keyed on the
+/// four key columns.
+pub fn run_rank_aggregate(
+    adata: &Adata,
+    resource: &[LrPair],
+    expr_prop: f64,
+    min_cells: usize,
+    seed: u64,
+    n_perms: usize,
+) -> Result<Vec<Row>> {
+    let frame = frame(adata, resource, expr_prop, min_cells, false)?;
+    let n_vars = frame.prep.n_vars();
+
+    // CellPhoneDB's `lr_means`: `_cpdb_score`'s zero mask and `f32` mean
+    // (`method/sc/_cellphonedb.py:22-26`), then the permutation p-values over
+    // the same statistic.
+    let lr_means: Vec<f32> = frame
+        .rows
+        .iter()
+        .map(|row| {
+            if row.ligand_means == 0.0 || row.receptor_means == 0.0 {
+                0.0
+            } else {
+                (row.ligand_means + row.receptor_means) / 2.0
+            }
+        })
+        .collect();
+    let truth: Vec<f64> = lr_means.iter().map(|&m| f64::from(m)).collect();
+    let cellphone_pvals = engine::pvals_streaming(
+        &frame.prep,
+        &frame.sel,
+        &truth,
+        seed,
+        n_perms,
+        0,
+        Aggregation::Mean,
+        |ligand, receptor| (ligand + receptor) / 2.0,
+    );
+
+    // Connectome's and NATMI's `expr_prod`, the two subunit means' `f32`
+    // product — the one score both methods rank, so it joins once.
+    let expr_prod: Vec<f32> = frame
+        .rows
+        .iter()
+        .map(|row| row.ligand_means * row.receptor_means)
+        .collect();
+
+    // Connectome's `scaled_weight` and logfc's `lr_logfc`: the `f64` means of
+    // the two per-label tables `_get_lr` builds.
+    let zscores = scale_zscores(&frame.prep);
+    let logfc = log2fc(&frame.prep);
+    let mut scaled_weight = vec![0.0f64; frame.rows.len()];
+    let mut lr_logfc = vec![0.0f64; frame.rows.len()];
+    for (index, row) in frame.rows.iter().enumerate() {
+        let exploded = &frame.subunits[row.subunit];
+        let ligand = gene_index(&frame.prep, &exploded.ligand, "ligand")?;
+        let receptor = gene_index(&frame.prep, &exploded.receptor, "receptor")?;
+        scaled_weight[index] =
+            (zscores[row.source * n_vars + ligand] + zscores[row.target * n_vars + receptor]) / 2.0;
+        lr_logfc[index] =
+            (logfc[row.source * n_vars + ligand] + logfc[row.target * n_vars + receptor]) / 2.0;
+    }
+
+    // NATMI's `spec_weight` (`method/sc/_natmi.py:22-26`) and
+    // SingleCellSignalR's `lrscore` (`method/sc/_singlecellsignalr.py:20-24`),
+    // both all-`f32`.
+    let ligand_sums = mean_sums(&frame, Side::Ligand);
+    let receptor_sums = mean_sums(&frame, Side::Receptor);
+    let mat_mean = mat_mean(&frame.prep);
+    let mut spec_weight = vec![0.0f32; frame.rows.len()];
+    let mut lrscore = vec![0.0f32; frame.rows.len()];
+    for (index, row) in frame.rows.iter().enumerate() {
+        spec_weight[index] =
+            (row.ligand_means / ligand_sums[index]) * (row.receptor_means / receptor_sums[index]);
+        let lr_sqrt = row.ligand_means.sqrt() * row.receptor_means.sqrt();
+        lrscore[index] = lr_sqrt / (lr_sqrt + mat_mean);
+    }
+
+    // `AggregateClass`'s specs (`method/sc/_rank_aggregate.py:66-79`): one
+    // `(score, ascending)` per method, deduplicated on the score name in
+    // `_methods` order — Connectome's and NATMI's `expr_prod` are one column,
+    // ranked once, descending. `lr_res` carries no missing score here, so the
+    // `fillna(_assign_min_or_max(...))` arm of `_rank_aggregate:158` is
+    // unreachable (it ranks with `nan_policy="propagate"`, which the frame's
+    // no-NaN contract makes moot too).
+    let specificity_rank = robust_rank_aggregate(&[
+        RankSpec::F64(&cellphone_pvals, true),
+        RankSpec::F64(&scaled_weight, false),
+        RankSpec::F64(&lr_logfc, false),
+        RankSpec::F32(&spec_weight, false),
+    ]);
+    let magnitude_rank = robust_rank_aggregate(&[
+        RankSpec::F32(&lr_means, false),
+        RankSpec::F32(&expr_prod, false),
+        RankSpec::F32(&lrscore, false),
+    ]);
+
+    let mut scored: Vec<(f64, Row)> = Vec::with_capacity(frame.rows.len());
+    for (index, row) in frame.rows.iter().enumerate() {
+        let exploded = &frame.subunits[row.subunit];
+        scored.push((
+            magnitude_rank[index],
+            Row {
+                cells: vec![
+                    frame.prep.labels[row.source].clone(),
+                    frame.prep.labels[row.target].clone(),
+                    exploded.ligand_complex.clone(),
+                    exploded.receptor_complex.clone(),
+                    exploded.ligand.clone(),
+                    exploded.receptor.clone(),
+                    row.ligand_means.to_string(),
+                    row.receptor_means.to_string(),
+                    row.ligand_props.to_string(),
+                    row.receptor_props.to_string(),
+                    lr_means[index].to_string(),
+                    cellphone_pvals[index].to_string(),
+                    expr_prod[index].to_string(),
+                    scaled_weight[index].to_string(),
+                    lr_logfc[index].to_string(),
+                    spec_weight[index].to_string(),
+                    lrscore[index].to_string(),
+                    specificity_rank[index].to_string(),
+                    magnitude_rank[index].to_string(),
+                ],
+            },
+        ));
+    }
+    scored.sort_by(|(left, _), (right, _)| {
+        left.partial_cmp(right)
+            .expect("magnitude_rank is never NaN")
+    });
+    Ok(scored.into_iter().map(|(_, row)| row).collect())
+}
+
+/// One `(score column, ascending)` pair of a consensus option's specs, over
+/// the columns of the joined frame.
+enum RankSpec<'a> {
+    /// A `f64` score column — `cellphone_pvals`, `scaled_weight` or `lr_logfc`.
+    F64(&'a [f64], bool),
+    /// An `f32` one. `rankdata` is dtype-preserving in scipy 1.18.1, but the
+    /// average ranks are half-integers in `1..=440`, exact in both dtypes, so
+    /// ranking in `f64` and casting the matrix back to `f32` is bit-identical.
+    F32(&'a [f32], bool),
+}
+
+impl RankSpec<'_> {
+    /// The column's row count.
+    fn len(&self) -> usize {
+        match self {
+            RankSpec::F64(values, _) => values.len(),
+            RankSpec::F32(values, _) => values.len(),
+        }
+    }
+}
+
+/// `_rank_aggregate`'s `rra` branch, `_robust_rank_aggregate` and `_rho_scores`
+/// (`_core/_pipe_utils/_aggregate.py:156-241`), returning the consensus rank.
+///
+/// `np.column_stack` promotes the ranked columns to `f64` as soon as one of
+/// them is `f64` — the specificity option mixes three `f64` scores with `f32`
+/// `spec_weight` and lands in `f64`, the magnitude option is `f32` throughout.
+/// The normalisation `rmat / np.max(rmat, axis=0)` and the row sort stay in
+/// that dtype (`np.sort` on the `f32` matrix orders by the same values), and
+/// the `f64` round-to-half-integer behaviour of the `f32` division is
+/// observable in the CDF output, so it is reproduced. `beta.cdf(x, a, b)`
+/// promotes to `f64` (int64 shape args) — so the CDF, the row minimum and the
+/// `p * k` clip are all `f64`, through the [`betainc`] kernel.
+///
+/// `a = j + 1` and `b = k - j` for the column index `j` of a `k`-column matrix,
+/// over the row's *sorted* normalised ranks (`dist_a`/`dist_b` are assigned
+/// before `np.sort` moves the values, but they are functions of the column
+/// index, not of the values).
+fn robust_rank_aggregate(specs: &[RankSpec<'_>]) -> Vec<f64> {
+    let k = specs.len();
+    let n = specs[0].len();
+    let double = specs.iter().any(|spec| matches!(spec, RankSpec::F64(..)));
+
+    // rankdata(col * (1 if asc else -1), method="average"), per column, in f64.
+    let mut columns: Vec<Vec<f64>> = Vec::with_capacity(k);
+    for spec in specs {
+        let (values, ascending) = match *spec {
+            RankSpec::F64(values, ascending) => (values.to_vec(), ascending),
+            RankSpec::F32(values, ascending) => {
+                (values.iter().map(|&v| f64::from(v)).collect(), ascending)
+            }
+        };
+        let signed: Vec<f64> = if ascending {
+            values
+        } else {
+            values.into_iter().map(|v| -v).collect()
+        };
+        columns.push(average_ranks(&signed));
+    }
+
+    // `np.column_stack`'s dtype promotion, then `rmat / np.max(rmat, axis=0)`.
+    let maxima: Vec<f64> = (0..k)
+        .map(|j| columns[j].iter().copied().fold(f64::NEG_INFINITY, f64::max))
+        .collect();
+    let mut rmat: Vec<Vec<f64>> = (0..n)
+        .map(|i| (0..k).map(|j| columns[j][i]).collect())
+        .collect();
+    for row in rmat.iter_mut() {
+        for (j, value) in row.iter_mut().enumerate() {
+            *value = if double {
+                *value / maxima[j]
+            } else {
+                f64::from((*value as f32) / (maxima[j] as f32))
+            };
+        }
+        row.sort_by(|a, b| a.partial_cmp(b).expect("normalised ranks are never NaN"));
+    }
+
+    // `_rho_scores`: the beta CDF per (row, column), the row minimum, and
+    // `_corr_beta_pvals`' `np.clip(p * k, 0, 1)`.
+    rmat.iter()
+        .map(|row| {
+            let p = row
+                .iter()
+                .enumerate()
+                .map(|(j, &x)| betainc((j + 1) as f64, (k - j) as f64, x))
+                .fold(f64::INFINITY, f64::min);
+            (p * k as f64).clamp(0.0, 1.0)
+        })
+        .collect()
+}
+
+/// `scipy.stats.rankdata(method="average")` over one score column: each tie
+/// group's mean of the 1-based ranks `start + 1 ..= end` (0-based `start`,
+/// exclusive `end`), i.e. the half-integer `(start + end + 1) / 2`
+/// (`_rankdata.py:143-153`). The sort is only a grouping device — every member
+/// of a group takes the group's rank — so the port's stability is immaterial.
+fn average_ranks(values: &[f64]) -> Vec<f64> {
+    let mut order: Vec<usize> = (0..values.len()).collect();
+    order.sort_by(|&a, &b| {
+        values[a]
+            .partial_cmp(&values[b])
+            .expect("scores are never NaN")
+    });
+
+    let mut ranks = vec![0.0f64; values.len()];
+    let mut start = 0usize;
+    while start < order.len() {
+        let mut end = start + 1;
+        while end < order.len() && values[order[end]] == values[order[start]] {
+            end += 1;
+        }
+        let rank = (start + end + 1) as f64 / 2.0;
+        for &index in &order[start..end] {
+            ranks[index] = rank;
+        }
+        start = end;
+    }
+    ranks
 }
 
 /// `_cluster_stats` (`_liana_pipe.py:742-751`): each cluster's scalar mean

@@ -287,6 +287,7 @@ def main() -> int:
     dump_cellchat(version, commit)
     for name, method in SIMPLE_METHODS:
         dump_simple(version, commit, name, method)
+    dump_rank_aggregate(version, commit)
     return 0
 
 
@@ -432,6 +433,157 @@ def dump_simple(version: str, commit: str, name: str, method) -> None:
         f"  {name:<18} rows={len(lr_res)} labels={labels} scores={scores}"
         f" p100={per_n_perms['100']['sha256_columns_bits'][scores[0]][:16]}"
     )
+
+
+def dump_rank_aggregate(version: str, commit: str) -> None:
+    """The `rank_aggregate` half: the joined frame, the specs and the RRA.
+
+    Unlike the method dumps this one does not rebuild the call path: it wraps
+    the two rank helpers `_aggregate` calls (`_rank_aggregate` and
+    `_robust_rank_aggregate`, `_core/_pipe_utils/_aggregate.py:102-241`)
+    around a real `li.mt.rank_aggregate` run, so the joined frame, the specs,
+    the rank matrix and both consensus columns are the oracle's own objects.
+    The helpers are looked up as module globals at call time, so patching them
+    on `_aggregate` catches exactly the calls `liana_pipe_consensus` makes.
+
+    Both consensus options are captured per run — `_aggregate` assigns
+    `specificity_rank` first and `magnitude_rank` second, whatever the
+    `consensus_opts` order — which also pins that the magnitude option ranks
+    against the frame that already carries the specificity column.
+    """
+    import liana._core._pipe_utils._aggregate as ag
+
+    adata_in = ad.read_h5ad(ADATA_PATH)
+    toy = pd.read_csv(TOY_PATH)
+    consensus = li.mt.rank_aggregate
+    methods = [method.method_name for method in consensus.methods]
+
+    captured: list[dict] = []
+    real_rank_aggregate = ag._rank_aggregate
+    real_rra = ag._robust_rank_aggregate
+
+    def capture(lr_res, specs, aggregate_method, verbose=False):
+        entry = {"joined": lr_res.copy(), "specs": dict(specs)}
+        captured.append(entry)  # before delegating: `capture_rra` fills the rmat in
+        out = real_rank_aggregate(lr_res, specs, aggregate_method, verbose=verbose)
+        entry["out"] = np.array(out, copy=True)
+        return out
+
+    def capture_rra(rmat):
+        out = real_rra(rmat)
+        captured[-1]["rmat"] = np.array(rmat, copy=True)
+        return out
+
+    def bits_stream(values) -> str:
+        values = np.asarray(values).reshape(-1)
+        if values.dtype == np.float32:
+            return f32_bits_stream(values)
+        assert values.dtype == np.float64, values.dtype
+        return f64_bits_stream(values)
+
+    per_n_perms: dict[str, dict] = {}
+    for n_perms in N_PERMS:
+        captured.clear()
+        ag._rank_aggregate = capture
+        ag._robust_rank_aggregate = capture_rra
+        try:
+            result = li.mt.rank_aggregate(
+                adata_in,
+                groupby=GROUPBY,
+                resource_name="consensus",
+                resource=toy,
+                n_perms=n_perms,
+                seed=SEED,
+                n_jobs=1,
+                inplace=False,
+                verbose=False,
+            )
+        finally:
+            ag._rank_aggregate = real_rank_aggregate
+            ag._robust_rank_aggregate = real_rra
+
+        assert len(captured) == 2, f"expected the two consensus options, captured {len(captured)}"
+        # the CSV contract: the ranks are the frame's last two columns, in
+        # `_aggregate`'s assignment order, and they are what `_sort_by_score`
+        # ordered by (`magnitude_rank`, ascending).
+        assert [str(col) for col in result.columns] == [
+            "source", "target", "ligand_complex", "receptor_complex", "ligand", "receptor",
+            "ligand_means", "receptor_means", "ligand_props", "receptor_props", "lr_means",
+            "cellphone_pvals", "expr_prod", "scaled_weight", "lr_logfc", "spec_weight", "lrscore",
+            "specificity_rank", "magnitude_rank",
+        ], list(result.columns)
+        assert result["magnitude_rank"].is_monotonic_increasing, "sorted by magnitude_rank"
+
+        joined = captured[0]["joined"]
+        # the result is sorted by `magnitude_rank`; align it back onto the
+        # joined frame's row order before comparing against the captured
+        # columns, which are in that order.
+        aligned = result.set_index(KEY_COLS).reindex(pd.MultiIndex.from_frame(joined[KEY_COLS]))
+
+        options = {}
+        for option, entry in zip(("specificity_rank", "magnitude_rank"), captured, strict=True):
+            joined, rmat, out = entry["joined"], entry["rmat"], entry["out"]
+            assert list(joined.columns) == [str(col) for col in result.columns][: joined.shape[1]]
+            assert rmat.shape == (joined.shape[0], len({spec[0] for spec in entry["specs"].values()}))
+            assert np.array_equal(aligned[option].to_numpy(), out), option
+            options[option] = {
+                "specs": {method: [score, asc] for method, (score, asc) in entry["specs"].items()},
+                "columns": [str(col) for col in joined.columns],
+                "rank_columns": list(dict.fromkeys(score for score, _ in entry["specs"].values())),
+                "rmat_dtype": str(rmat.dtype),
+                "rmat_shape": list(rmat.shape),
+                "sha256_rmat_bits": bits_stream(rmat),
+                "sha256_joined_bits": numeric_col_shas(joined),
+                "sha256_out_bits": bits_stream(out),
+                "first_rmat_row": [num(v) for v in rmat[0]],
+                "first_out": [num(v) for v in out[:3]],
+            }
+
+        assert len(joined) == len(result), "the joined frame and the result agree on the rows"
+        per_n_perms[str(n_perms)] = {
+            "seed": SEED,
+            "n_perms": n_perms,
+            "columns": [str(col) for col in result.columns],
+            "sha256_keys": sha256_stream(
+                f"{s}\t{t}\t{lc}\t{rc}\n"
+                for s, t, lc, rc in zip(
+                    result[P.source], result[P.target], result[P.ligand_complex],
+                    result[P.receptor_complex], strict=True,
+                )
+            ),
+            "options": options,
+        }
+
+    payload = {
+        "liana_version": version,
+        "liana_commit": commit,
+        "numpy_version": np.__version__,
+        "adata": str(ADATA_PATH.relative_to(REPO_ROOT)),
+        "adata_sha256": hashlib.sha256(ADATA_PATH.read_bytes()).hexdigest(),
+        "resource": str(TOY_PATH.relative_to(REPO_ROOT)),
+        "resource_sha256": hashlib.sha256(TOY_PATH.read_bytes()).hexdigest(),
+        "groupby": GROUPBY,
+        "expr_prop": V.expr_prop,
+        "min_cells": V.min_cells,
+        "method": "rank_aggregate",
+        "aggregate_method": "rra",
+        "methods": methods,
+        "specificity_rank": consensus.specificity,
+        "magnitude_rank": consensus.magnitude,
+        "lr_rows": {"n_rows": int(len(joined))},
+        "n_perms": per_n_perms,
+    }
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    (OUT_DIR / "synthetic__rank_aggregate.json").write_text(json.dumps(payload, indent=2) + "\n")
+
+    print(f"  rank_aggregate     methods={methods}")
+    for n_perms in N_PERMS:
+        entry = per_n_perms[str(n_perms)]
+        for option, opt in entry["options"].items():
+            print(
+                f"  p{n_perms:<5} {option:<16} {opt['rmat_dtype']} {opt['rmat_shape']}"
+                f" rmat={opt['sha256_rmat_bits'][:16]} out={opt['sha256_out_bits'][:16]}"
+            )
 
 
 def dump_cellchat(version: str, commit: str) -> None:
