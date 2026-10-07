@@ -1,3 +1,5 @@
 target/
 ops/logs/
 __pycache__/
+# maturin's `develop` build of the extension module (mixed layout)
+crates/liana-py/python/liana_rs/*.so

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/liana-core", "crates/liana-cli", "bench/engine_bench"]
+members = ["crates/liana-core", "crates/liana-cli", "crates/liana-py", "bench/engine_bench"]
 
 [workspace.package]
 edition = "2024"
