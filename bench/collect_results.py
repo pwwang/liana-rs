@@ -4,12 +4,14 @@
 
 Reads   <outdir>/results_t{1..5}.tsv, <outdir>/cmds_t{1..5}.tsv
         (default outdir: <repo>/target/bench7)
-Writes  <repo>/bench/results.json
+Writes  <repo>/bench/results.json, <repo>/bench/RESULTS.md
 
 Everything in the output is either measured by the suite on this box or a
 version/checksum read from the pinned toolchains; the one deliberate exception
 is `recorded_references`, which re-reads the p0a logs the paper's baseline
-numbers came from (read-only) so the manifest says where each came from.
+numbers came from (read-only) so the manifest says where each came from. The
+wall-stability replications quoted in the generated Caveats prose live, with
+their exact commands, in `ops/logs/w7-report.md`.
 """
 import hashlib
 import json
@@ -257,8 +259,11 @@ def markdown(doc):
     a("")
     a("The frozen numbers behind the paper's figures. Every row was measured on one")
     a(f"box — {box['cpu']}, {box['cores']} vCPU, {box['mem_total_kb'] // 1024 // 1024} GB RAM, "
-      f"kernel {box['kernel']} — in one serial")
-    a(f"run of `bench/bench_suite.sh` on {doc['generated_at'][:10]}, seed 1337. The")
+      f"kernel {box['kernel']} — in serial")
+    a(f"passes of `bench/bench_suite.sh` on {doc['generated_at'][:10]}, seed 1337: stages")
+    a("t1–t4 in one run; t5 re-run once (each stage rewrites its own TSV) after its")
+    a("4,620-LR resource was rebuilt — the failed first attempt is kept in")
+    a("`target/bench7/miss_t5_resource/`. The")
     a("machine-readable twin of this file is `bench/results.json`: every configuration")
     a("with its exact command, wall, peak RSS, thread counts, versions and input")
     a("sha256s. `bench/RESULTS.md` is generated from it (`bench/collect_results.py`),")
@@ -328,6 +333,9 @@ def markdown(doc):
           f"{cli['rows']} rows, {fmt_s(cli['elapsed_s'])} s whole-process, "
           f"{fmt_mb(cli['rss_kb'])} MB peak — the same dispatch the harness's `rust`")
         a("rows use, driven through the shipped binary.")
+        a("")
+        a("The `patched` arm's wall is this table's least box-state-stable cell — see")
+        a("*Box-state sensitivity* under Caveats before quoting it.")
         a("")
 
     # ---- T2
@@ -488,6 +496,15 @@ def markdown(doc):
     a("- The 50k/100k `.h5ad` reads are sometimes cold (first touch after a big Python")
     a("  arm evicted page cache); that cost is inside both the `rust` and the Python")
     a("  `elapsed` numbers, and inside the `rust` in-process wall (read is timed there).")
+    a("- **Box-state sensitivity (wall only).** The `patched` arm's wall moves with the")
+    a("  box's state at run time: at 50k × p1000 it measured 13.4–14.8 s in the recorded")
+    a("  logs, 15.0–15.1 s re-run standalone on a cold box, 18.6–18.8 s with the box warm,")
+    a("  and 20.1 / 20.6 s in the suite's two serial runs — the table carries the suite")
+    a("  value, which both suite runs reproduce on this config. `release` (same config)")
+    a("  spans 17.1–19.4 s and `rust` 7.5–8.4 s over the same contexts. Peak RSS is")
+    a("  identical in every context (patched 1,902–1,905 MB): the memory numbers, not the")
+    a("  patched wall, are the box-invariant result. Replication record and commands:")
+    a("  `ops/logs/w7-report.md`.")
     a("")
     path = REPO / "bench/RESULTS.md"
     path.write_text("\n".join(L) + "\n")
