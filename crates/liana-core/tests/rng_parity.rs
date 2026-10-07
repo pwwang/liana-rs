@@ -101,10 +101,13 @@ fn permutation_stream_matches_numpy_reference() {
             .iter()
             .flat_map(|&v| u16::try_from(v).expect("index fits u16").to_le_bytes())
             .collect();
+
         if sha256_hex(&produced) != entry.data_sha256 {
             let at = produced
-                .chunks_exact(2)
-                .zip(payload.chunks_exact(2))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .zip(payload.as_chunks::<2>().0.iter())
                 .position(|(a, b)| a != b)
                 .expect("equal length payload");
             failures.push(format!(

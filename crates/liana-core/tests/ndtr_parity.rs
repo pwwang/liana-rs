@@ -63,8 +63,10 @@ fn decode(vector: &Vector) -> Vec<f64> {
     );
     assert_eq!(bytes.len(), vector.count * 8, "vector length");
     bytes
-        .chunks_exact(8)
-        .map(|c| f64::from_bits(u64::from_be_bytes(c.try_into().unwrap())))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|c| f64::from_bits(u64::from_be_bytes(*c)))
         .collect()
 }
 

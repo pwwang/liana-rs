@@ -78,8 +78,10 @@ fn decode(vector: &Vector) -> Vec<f32> {
     );
     assert_eq!(bytes.len(), vector.count * 4, "vector length");
     bytes
-        .chunks_exact(4)
-        .map(|c| f32::from_bits(u32::from_be_bytes(c.try_into().unwrap())))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_bits(u32::from_be_bytes(*c)))
         .collect()
 }
 

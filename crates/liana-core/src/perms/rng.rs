@@ -86,7 +86,9 @@ pub fn seed_sequence_state_u64(seed: u64, n_words: usize) -> Vec<u64> {
         })
         .collect();
     words32
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|w| (w[0] as u64) | (w[1] as u64) << 32)
         .collect()
 }
