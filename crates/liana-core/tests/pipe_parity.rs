@@ -1,5 +1,5 @@
-//! End-to-end parity of `pipe::run_cellphonedb` against the oracle CSVs
-//! (`testdata/expected/synthetic__cellphonedb__p{100,1000}.csv`), value-exactly.
+//! End-to-end parity of the `pipe` runners against the oracle CSVs
+//! (`testdata/expected/synthetic__<method>__p{100,1000}.csv`), value-exactly.
 //!
 //! The produced CSVs land in `target/pipe_out/` for `scripts/parity_diff.py`
 //! to cross-check; the assertions here compare the parsed values by bit, keyed
@@ -9,9 +9,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use liana_core::io::read_h5ad;
-use liana_core::pipe::{CpdbRow, run_cellphonedb};
-use liana_core::resource;
+use liana_core::io::{Adata, read_h5ad};
+use liana_core::pipe::{
+    CPDB_CSV_HEADER, GMEAN_CSV_HEADER, LrRow, run_cellphonedb, run_geometric_mean,
+};
+use liana_core::resource::{self, LrPair};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -37,16 +39,97 @@ struct Entry {
 }
 
 /// The key columns of liana's `_key_cols` — `(source, target, ligand_complex,
-/// receptor_complex)`; the oracle CSV has no duplicate keys.
+/// receptor_complex)`; the oracle CSVs have no duplicate keys.
 type Key = (String, String, String, String);
 
-fn key_of(row: &CpdbRow) -> Key {
+fn key_of(row: &LrRow) -> Key {
     (
         row.source.clone(),
         row.target.clone(),
         row.ligand_complex.clone(),
         row.receptor_complex.clone(),
     )
+}
+
+/// A tolerance policy for one output column that cannot be bit-exact:
+/// `max_ulp` bounds every row's `f32` gap and `rows` pins how many rows may
+/// diverge at all, so the policy cannot widen unnoticed.
+#[derive(Clone, Copy)]
+struct UlpPolicy {
+    rows: usize,
+    max_ulp: u32,
+}
+
+/// `lr_gmeans` is the one column that is not bit-reproducible: it is
+/// `exp((log(l) + log(r))/2)` evaluated in `f32` (`_geometric_mean.py:28`),
+/// i.e. through numpy 2.5.3's own `f32` `log`/`exp` kernels — on this
+/// X86_V3 (AVX2+FMA3) build, Google Highway's — whose rounding differs from
+/// Rust's libm on 182 of the 440 pairs (gap histogram 1 ulp x178, 2 x2, 4 x2;
+/// each log's error can propagate through the mean and the `exp`).
+///
+/// Everything else — including the `f64` `gmean_pvals`, whose `>= observed`
+/// comparisons absorb the gap under `_TIE_RTOL` — is bit-exact.
+///
+/// TODO: port numpy 2.5.3's highway `Log`/`Exp` for `f32` and drop this
+/// policy (the count then becomes 0 and the column becomes exact). The
+/// pinned count is measured against the oracle, so any drift trips it; the
+/// gap is documented in `ops/logs/w3-report.md`.
+const GMEAN_POLICY: &[(&str, UlpPolicy)] = &[(
+    "lr_gmeans",
+    UlpPolicy {
+        rows: 182,
+        max_ulp: 4,
+    },
+)];
+
+/// The method under test: its runner, its CSV contract and its comparison
+/// policy.
+#[derive(Clone, Copy)]
+enum Method {
+    Cellphonedb,
+    GeometricMean,
+}
+
+impl Method {
+    fn name(self) -> &'static str {
+        match self {
+            Method::Cellphonedb => "cellphonedb",
+            Method::GeometricMean => "geometric_mean",
+        }
+    }
+
+    fn header(self) -> &'static str {
+        match self {
+            Method::Cellphonedb => CPDB_CSV_HEADER,
+            Method::GeometricMean => GMEAN_CSV_HEADER,
+        }
+    }
+
+    fn policy(self) -> &'static [(&'static str, UlpPolicy)] {
+        match self {
+            Method::Cellphonedb => &[],
+            Method::GeometricMean => GMEAN_POLICY,
+        }
+    }
+
+    fn run(
+        self,
+        adata: &Adata,
+        resource: &[LrPair],
+        expr_prop: f64,
+        min_cells: usize,
+        seed: u64,
+        n_perms: usize,
+    ) -> anyhow::Result<Vec<LrRow>> {
+        match self {
+            Method::Cellphonedb => {
+                run_cellphonedb(adata, resource, expr_prop, min_cells, seed, n_perms)
+            }
+            Method::GeometricMean => {
+                run_geometric_mean(adata, resource, expr_prop, min_cells, seed, n_perms)
+            }
+        }
+    }
 }
 
 /// The CSV's header and rows, as raw fields.
@@ -65,7 +148,7 @@ fn read_csv(path: &Path) -> (Vec<String>, Vec<Vec<String>>) {
     (header, rows)
 }
 
-fn row_fields(row: &CpdbRow) -> Vec<String> {
+fn row_fields(row: &LrRow) -> Vec<String> {
     vec![
         row.ligand.clone(),
         row.ligand_complex.clone(),
@@ -77,28 +160,23 @@ fn row_fields(row: &CpdbRow) -> Vec<String> {
         row.receptor_props.to_string(),
         row.source.clone(),
         row.target.clone(),
-        row.lr_means.to_string(),
-        row.cellphone_pvals.to_string(),
+        row.magnitude.to_string(),
+        row.specificity.to_string(),
     ]
-}
-
-/// Whether two fields of one column carry the same value — the float columns
-/// by their parsed bits (each side's shortest round-trip parse is exact), the
-/// rest as strings.
-fn equal_field(column: &str, expected: &str, actual: &str) -> bool {
-    match column {
-        "ligand_means" | "receptor_means" | "lr_means" => {
-            expected.parse::<f32>().unwrap().to_bits() == actual.parse::<f32>().unwrap().to_bits()
-        }
-        "ligand_props" | "receptor_props" | "cellphone_pvals" => {
-            expected.parse::<f64>().unwrap().to_bits() == actual.parse::<f64>().unwrap().to_bits()
-        }
-        _ => expected == actual,
-    }
 }
 
 #[test]
 fn cellphonedb_pipeline_matches_the_oracle_csv() {
+    run_and_compare(Method::Cellphonedb);
+}
+
+#[test]
+fn geometric_mean_pipeline_matches_the_oracle_csv() {
+    run_and_compare(Method::GeometricMean);
+}
+
+fn run_and_compare(method: Method) {
+    let name = method.name();
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let reference: Ref = serde_json::from_str(
         &fs::read_to_string(root.join("testdata/pipe_ref/synthetic__cellphonedb.json"))
@@ -111,50 +189,47 @@ fn cellphonedb_pipeline_matches_the_oracle_csv() {
     let out_dir = root.join("target/pipe_out");
     fs::create_dir_all(&out_dir).unwrap();
 
-    for (name, entry) in &reference.n_perms {
-        let rows = run_cellphonedb(
-            &adata,
-            &resource,
-            reference.expr_prop,
-            reference.min_cells,
-            entry.seed,
-            entry.n_perms,
-        )
-        .unwrap();
+    for (n, entry) in &reference.n_perms {
+        let rows = method
+            .run(
+                &adata,
+                &resource,
+                reference.expr_prop,
+                reference.min_cells,
+                entry.seed,
+                entry.n_perms,
+            )
+            .unwrap();
 
-        let mut text = String::from(CpdbRow::CSV_HEADER);
+        let mut text = String::from(method.header());
         text.push('\n');
         for row in &rows {
             text.push_str(&row.to_csv_line());
             text.push('\n');
         }
-        fs::write(
-            out_dir.join(format!("synthetic__cellphonedb__p{name}.csv")),
-            text,
-        )
-        .unwrap();
+        fs::write(out_dir.join(format!("synthetic__{name}__p{n}.csv")), text).unwrap();
 
-        let expected_path = root.join(format!(
-            "testdata/expected/synthetic__cellphonedb__p{name}.csv"
-        ));
-        compare(&expected_path, &rows, reference.lr_rows.n_rows, name);
+        let expected_path = root.join(format!("testdata/expected/synthetic__{name}__p{n}.csv"));
+        compare(&expected_path, method, &rows, reference.lr_rows.n_rows, n);
     }
 }
 
 /// Exact keyed comparison of the oracle CSV and the produced rows, reporting
-/// the first diverging row/column with both values.
-fn compare(expected_path: &Path, rows: &[CpdbRow], oracle_rows: usize, name: &str) {
+/// the first diverging row/column with both values; the columns of the
+/// method's policy may diverge within their stated bound.
+fn compare(expected_path: &Path, method: Method, rows: &[LrRow], oracle_rows: usize, n: &str) {
+    let name = method.name();
     let (header, expected_rows) = read_csv(expected_path);
     assert_eq!(
         header.join(","),
-        CpdbRow::CSV_HEADER,
-        "p{name}: the oracle CSV's column contract"
+        method.header(),
+        "{name} p{n}: the oracle CSV's column contract"
     );
     // an empty oracle CSV must not pass the comparison vacuously
     assert_eq!(
         (expected_rows.len(), rows.len()),
         (oracle_rows, oracle_rows),
-        "p{name}: row count"
+        "{name} p{n}: row count"
     );
     let column = |name: &str| header.iter().position(|c| c == name).unwrap();
 
@@ -169,11 +244,15 @@ fn compare(expected_path: &Path, rows: &[CpdbRow], oracle_rows: usize, name: &st
         );
         assert!(
             expected.insert(key, expected_row).is_none(),
-            "p{name}: duplicate oracle key"
+            "{name} p{n}: duplicate oracle key"
         );
     }
-    let actual: BTreeMap<Key, &CpdbRow> = rows.iter().map(|row| (key_of(row), row)).collect();
-    assert_eq!(actual.len(), rows.len(), "p{name}: duplicate produced key");
+    let actual: BTreeMap<Key, &LrRow> = rows.iter().map(|row| (key_of(row), row)).collect();
+    assert_eq!(
+        actual.len(),
+        rows.len(),
+        "{name} p{n}: duplicate produced key"
+    );
 
     let missing: Vec<&Key> = expected
         .keys()
@@ -185,24 +264,85 @@ fn compare(expected_path: &Path, rows: &[CpdbRow], oracle_rows: usize, name: &st
         .collect();
     assert!(
         missing.is_empty() && extra.is_empty(),
-        "p{name}: key mismatch — {} oracle rows absent (first: {:?}), {} produced rows unexpected \
-         (first: {:?})",
+        "{name} p{n}: key mismatch — {} oracle rows absent (first: {:?}), {} produced rows \
+         unexpected (first: {:?})",
         missing.len(),
         missing.first(),
         extra.len(),
         extra.first(),
     );
 
+    // (diverging rows, worst ulp gap) per policy column.
+    let mut gaps = vec![(0usize, 0u32); method.policy().len()];
     for (key, expected_row) in &expected {
         let actual_fields = row_fields(actual[key]);
         for (index, column_name) in header.iter().enumerate() {
-            if !equal_field(column_name, &expected_row[index], &actual_fields[index]) {
-                panic!(
-                    "p{name}: first divergence at source={} target={} ligand_complex={} \
-                     receptor_complex={} column={column_name}: expected {:?} got {:?}",
-                    key.0, key.1, key.2, key.3, expected_row[index], actual_fields[index],
-                );
+            let expected_field = &expected_row[index];
+            let actual_field = &actual_fields[index];
+            match method
+                .policy()
+                .iter()
+                .position(|(policy_column, _)| policy_column == column_name)
+            {
+                None => {
+                    if !equal_field(column_name, expected_field, actual_field) {
+                        panic!(
+                            "{name} p{n}: first divergence at source={} target={} \
+                             ligand_complex={} receptor_complex={} column={column_name}: \
+                             expected {expected_field:?} got {actual_field:?}",
+                            key.0, key.1, key.2, key.3,
+                        );
+                    }
+                }
+                Some(policy_index) => {
+                    let policy = method.policy()[policy_index].1;
+                    let expected: f32 = expected_field.parse().unwrap();
+                    let actual: f32 = actual_field.parse().unwrap();
+                    if expected.to_bits() != actual.to_bits() {
+                        let gap = (i64::from(expected.to_bits()) - i64::from(actual.to_bits()))
+                            .unsigned_abs() as u32;
+                        assert!(
+                            gap <= policy.max_ulp,
+                            "{name} p{n}: column {column_name} at source={} target={} \
+                             ligand_complex={} receptor_complex={} diverges by {gap} ulp \
+                             (allowed {}) : expected {expected:?} got {actual:?}",
+                            key.0,
+                            key.1,
+                            key.2,
+                            key.3,
+                            policy.max_ulp,
+                        );
+                        gaps[policy_index].0 += 1;
+                        gaps[policy_index].1 = gaps[policy_index].1.max(gap);
+                    }
+                }
             }
         }
+    }
+
+    for (policy_index, (policy_column, policy)) in method.policy().iter().enumerate() {
+        let (rows, max_gap) = gaps[policy_index];
+        assert_eq!(
+            rows, policy.rows,
+            "{name} p{n}: rows diverging in {policy_column}: worst gap {max_gap} ulp (allowed \
+             {}); the pinned count is measured against the oracle — TODO says to drop the policy \
+             when numpy's f32 kernel is ported",
+            policy.max_ulp,
+        );
+    }
+}
+
+/// Whether two fields of one column carry the same value — the float columns
+/// by their parsed bits (each side's shortest round-trip parse is exact), the
+/// rest as strings.
+fn equal_field(column: &str, expected: &str, actual: &str) -> bool {
+    match column {
+        "ligand_means" | "receptor_means" | "lr_means" | "lr_gmeans" => {
+            expected.parse::<f32>().unwrap().to_bits() == actual.parse::<f32>().unwrap().to_bits()
+        }
+        "ligand_props" | "receptor_props" | "cellphone_pvals" | "gmean_pvals" => {
+            expected.parse::<f64>().unwrap().to_bits() == actual.parse::<f64>().unwrap().to_bits()
+        }
+        _ => expected == actual,
     }
 }

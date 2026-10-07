@@ -1,23 +1,40 @@
-//! The cellphonedb pipeline end to end — `_prepare_lr_stats` + `_run_method`
-//! + `_sort_by_score` for `liana.method.sc._cellphonedb`.
+//! The permutation-scored single-cell pipelines end to end — `_prepare_lr_stats`,
+//! `_run_method` and `_sort_by_score` for `liana.method.sc._cellphonedb` and
+//! `liana.method.sc._geometric_mean`.
 //!
-//! Reproduces `testdata/expected/synthetic__cellphonedb__p{100,1000}.csv`
-//! value-exactly from `testdata/fixtures/synthetic.h5ad`, the toy resource,
-//! `seed=1337` and the `expr_prop`/`min_cells` the oracle ran with.
+//! Reproduces `testdata/expected/synthetic__<method>__p{100,1000}.csv` from
+//! `testdata/fixtures/synthetic.h5ad`, the toy resource, `seed=1337` and the
+//! `expr_prop`/`min_cells` the oracle ran with.
 
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{Result, bail};
 
 use crate::io::Adata;
-use crate::perms::null::{means_cube, pvals};
+use crate::perms::null::{gmean_pvals, gmean32, means_cube, pvals};
 use crate::perms::rng::permutation_matrix;
 use crate::prep::{self, Prep};
-use crate::resource::{self, LrPair};
+use crate::resource::{self, LrPair, LrSubunit};
 
-/// One row of the oracle CSV, in its column order.
+/// The oracle CSV header of [`run_cellphonedb`]'s rows.
+pub const CPDB_CSV_HEADER: &str = "ligand,ligand_complex,ligand_means,ligand_props,\
+                                   receptor,receptor_complex,receptor_means,receptor_props,\
+                                   source,target,lr_means,cellphone_pvals";
+
+/// The oracle CSV header of [`run_geometric_mean`]'s rows.
+pub const GMEAN_CSV_HEADER: &str = "ligand,ligand_complex,ligand_means,ligand_props,\
+                                    receptor,receptor_complex,receptor_means,receptor_props,\
+                                    source,target,lr_gmeans,gmean_pvals";
+
+/// One row of a method's output, in the oracle CSV's column order.
+///
+/// The first ten columns are the shared `lr_res` frame; `magnitude` and
+/// `specificity` are the method's score and p-value — liana's own
+/// `magnitude`/`specificity` terms (`method/sc/_Method.py`): `lr_means` and
+/// `cellphone_pvals` for cellphonedb, `lr_gmeans` and `gmean_pvals` for
+/// geometric mean.
 #[derive(Debug, Clone, PartialEq)]
-pub struct CpdbRow {
+pub struct LrRow {
     pub ligand: String,
     pub ligand_complex: String,
     pub ligand_means: f32,
@@ -28,16 +45,12 @@ pub struct CpdbRow {
     pub receptor_props: f64,
     pub source: String,
     pub target: String,
-    pub lr_means: f32,
-    pub cellphone_pvals: f64,
+    pub magnitude: f32,
+    pub specificity: f64,
 }
 
-impl CpdbRow {
-    pub const CSV_HEADER: &'static str = "ligand,ligand_complex,ligand_means,ligand_props,\
-                                          receptor,receptor_complex,receptor_means,receptor_props,\
-                                          source,target,lr_means,cellphone_pvals";
-
-    /// The row as the oracle CSV writes it — plain comma-separated, no quoting
+impl LrRow {
+    /// The row as the oracle CSVs write it — plain comma-separated, no quoting
     /// (every string is a gene or cluster symbol), shortest-round-trip floats.
     pub fn to_csv_line(&self) -> String {
         format!(
@@ -52,8 +65,8 @@ impl CpdbRow {
             self.receptor_props,
             self.source,
             self.target,
-            self.lr_means,
-            self.cellphone_pvals,
+            self.magnitude,
+            self.specificity,
         )
     }
 }
@@ -83,20 +96,79 @@ fn key_of(row: &StatsRow) -> Key {
     (row.target, row.source, row.pair)
 }
 
-/// The cellphonedb run for one `n_perms`: `_prepare_lr_stats`' row frame,
-/// `_run_method`'s reassembly + scoring, and `_sort_by_score`.
+/// The shared front half of a permutation-scored method: `_prepare_lr_stats`'
+/// reassembled row frame plus `_run_method`'s permutation nulls, ready for a
+/// scorer to combine.
+struct Frame {
+    prep: Prep,
+    /// The surviving exploded subunits; `rows[i].subunit` names row `i`'s genes.
+    subunits: Vec<LrSubunit>,
+    rows: Vec<StatsRow>,
+    /// The `perms[:, source, ligand]` / `perms[:, target, receptor]` selections
+    /// `_run_method` stacks, `(n_rows, n_perms)` row-major.
+    ligand_nulls: Vec<f64>,
+    receptor_nulls: Vec<f64>,
+}
+
+impl Frame {
+    /// Row `index` as an output row, with the method's score columns.
+    fn row(&self, index: usize, magnitude: f32, specificity: f64) -> LrRow {
+        let row = &self.rows[index];
+        let exploded = &self.subunits[row.subunit];
+        LrRow {
+            ligand: exploded.ligand.clone(),
+            ligand_complex: exploded.ligand_complex.clone(),
+            ligand_means: row.ligand_means,
+            ligand_props: row.ligand_props,
+            receptor: exploded.receptor.clone(),
+            receptor_complex: exploded.receptor_complex.clone(),
+            receptor_means: row.receptor_means,
+            receptor_props: row.receptor_props,
+            source: self.prep.labels[row.source].clone(),
+            target: self.prep.labels[row.target].clone(),
+            magnitude,
+            specificity,
+        }
+    }
+
+    /// The output rows with their p-values, sorted by `magnitude` descending —
+    /// `_sort_by_score` (`_liana_pipe.py:465-476`).
+    ///
+    /// Deviation, documented in `ops/logs/w3-report.md`: pandas sorts through
+    /// numpy's `nargsort`, whose tie order comes from an introsort/SIMD argsort
+    /// with no cross-build contract — 220 of the 440 oracle rows sit in two-row
+    /// tie groups. This port sorts stably instead: the values are unaffected and
+    /// the parity gate is keyed on each row's four key columns.
+    fn finish(&self, magnitudes: &[f32], specificities: Vec<f64>) -> Vec<LrRow> {
+        let mut out: Vec<LrRow> = magnitudes
+            .iter()
+            .zip(specificities)
+            .enumerate()
+            .map(|(index, (&magnitude, specificity))| self.row(index, magnitude, specificity))
+            .collect();
+        out.sort_by(|a, b| {
+            b.magnitude
+                .partial_cmp(&a.magnitude)
+                .expect("magnitude is never NaN")
+        });
+        out
+    }
+}
+
+/// `_prepare_lr_stats` + reassembly + `_run_method`'s nulls, shared by the
+/// permutation-scored methods.
 ///
 /// `expr_prop` and `min_cells` are liana's `expr_prop` (as in
 /// `_filter_reassemble_complexes`) and the `min_cells` of `prep_check_adata`;
 /// `seed` and `n_perms` drive the permutation null.
-pub fn run_cellphonedb(
+fn frame(
     adata: &Adata,
     resource: &[LrPair],
     expr_prop: f64,
     min_cells: usize,
     seed: u64,
     n_perms: usize,
-) -> Result<Vec<CpdbRow>> {
+) -> Result<Frame> {
     let prep = prep::prepare(adata, min_cells)?;
 
     // A passed resource is deduplicated on its pair columns, first occurrence
@@ -157,16 +229,14 @@ pub fn run_cellphonedb(
 
     reassemble(&mut rows, expr_prop)?;
 
-    // `_run_method` (`_liana_pipe.py:674-693`): the permutation cube, the
-    // per-row ligand/receptor nulls, and `_cpdb_score`'s combined statistic.
+    // `_run_method` (`_liana_pipe.py:674-693`): the permutation cube and each
+    // row's ligand/receptor nulls.
     let perms = permutation_matrix(seed, prep.x.n_rows, n_perms);
     let cube = means_cube(&prep, &perms, n_perms);
     let (n_labels, n_vars) = (prep.n_labels(), prep.n_vars());
 
     let mut ligand_nulls = vec![0f64; rows.len() * n_perms];
     let mut receptor_nulls = vec![0f64; rows.len() * n_perms];
-    let mut truth = Vec::with_capacity(rows.len());
-    let mut out = Vec::with_capacity(rows.len());
     for (row_index, row) in rows.iter().enumerate() {
         let exploded = &subunits[row.subunit];
         let ligand = gene_index(&prep, &exploded.ligand, "ligand")?;
@@ -177,51 +247,75 @@ pub fn run_cellphonedb(
             receptor_nulls[row_index * n_perms + p] =
                 cube[(p * n_labels + row.target) * n_vars + receptor];
         }
-
-        // `_cpdb_score`: the f32 mean of the two subunit means, zeroed when
-        // either side is zero (`method/sc/_cellphonedb.py:17-41`).
-        let lr_means = if row.ligand_means == 0.0 || row.receptor_means == 0.0 {
-            0.0
-        } else {
-            (row.ligand_means + row.receptor_means) / 2.0
-        };
-        truth.push(lr_means);
-        out.push(CpdbRow {
-            ligand: exploded.ligand.clone(),
-            ligand_complex: exploded.ligand_complex.clone(),
-            ligand_means: row.ligand_means,
-            ligand_props: row.ligand_props,
-            receptor: exploded.receptor.clone(),
-            receptor_complex: exploded.receptor_complex.clone(),
-            receptor_means: row.receptor_means,
-            receptor_props: row.receptor_props,
-            source: prep.labels[row.source].clone(),
-            target: prep.labels[row.target].clone(),
-            lr_means,
-            // `_calculate_pvals` over the nulls, filled in below
-            cellphone_pvals: 0.0,
-        });
-    }
-    for (row, pvalue) in out
-        .iter_mut()
-        .zip(pvals(&ligand_nulls, &receptor_nulls, &truth, n_perms))
-    {
-        row.cellphone_pvals = pvalue;
     }
 
-    // `_sort_by_score` (`_liana_pipe.py:465-476`): by `lr_means`, descending.
-    //
-    // Deviation, documented in `ops/logs/w3-report.md`: pandas sorts through
-    // numpy's `nargsort`, whose tie order comes from an introsort/SIMD argsort
-    // with no cross-build contract — 220 of the 440 oracle rows sit in two-row
-    // tie groups. This port sorts stably instead: the values are unaffected and
-    // the parity gate is keyed on each row's four key columns.
-    out.sort_by(|a, b| {
-        b.lr_means
-            .partial_cmp(&a.lr_means)
-            .expect("lr_means is never NaN")
-    });
-    Ok(out)
+    Ok(Frame {
+        prep,
+        subunits,
+        rows,
+        ligand_nulls,
+        receptor_nulls,
+    })
+}
+
+/// The cellphonedb run for one `n_perms`: `lr_means` = the `f32` mean of the
+/// two subunit means, zeroed when either side is zero
+/// (`method/sc/_cellphonedb.py:17-41`), and `cellphone_pvals` over the nulls.
+pub fn run_cellphonedb(
+    adata: &Adata,
+    resource: &[LrPair],
+    expr_prop: f64,
+    min_cells: usize,
+    seed: u64,
+    n_perms: usize,
+) -> Result<Vec<LrRow>> {
+    let frame = frame(adata, resource, expr_prop, min_cells, seed, n_perms)?;
+
+    // `_cpdb_score`: zero_msk = either subunit mean zero (`_cellphonedb.py:22-26`)
+    let magnitudes: Vec<f32> = frame
+        .rows
+        .iter()
+        .map(|row| {
+            if row.ligand_means == 0.0 || row.receptor_means == 0.0 {
+                0.0
+            } else {
+                (row.ligand_means + row.receptor_means) / 2.0
+            }
+        })
+        .collect();
+    let specificities = pvals(
+        &frame.ligand_nulls,
+        &frame.receptor_nulls,
+        &magnitudes,
+        n_perms,
+    );
+    Ok(frame.finish(&magnitudes, specificities))
+}
+
+/// The geometric_mean run for one `n_perms`: `lr_gmeans` = scipy's `gmean` of
+/// the two subunit means in `f32` (`method/sc/_geometric_mean.py:28`) and
+/// `gmean_pvals` over the nulls.
+pub fn run_geometric_mean(
+    adata: &Adata,
+    resource: &[LrPair],
+    expr_prop: f64,
+    min_cells: usize,
+    seed: u64,
+    n_perms: usize,
+) -> Result<Vec<LrRow>> {
+    let frame = frame(adata, resource, expr_prop, min_cells, seed, n_perms)?;
+    let magnitudes: Vec<f32> = frame
+        .rows
+        .iter()
+        .map(|row| gmean32(row.ligand_means, row.receptor_means))
+        .collect();
+    let specificities = gmean_pvals(
+        &frame.ligand_nulls,
+        &frame.receptor_nulls,
+        &magnitudes,
+        n_perms,
+    );
+    Ok(frame.finish(&magnitudes, specificities))
 }
 
 /// `_filter_reassemble_complexes` (`liana/resource/_reassemble_complexes.py:11-87`):
@@ -328,10 +422,16 @@ mod tests {
         assert_eq!((row.source.as_str(), row.target.as_str()), ("A", "A"));
         assert_eq!(row.ligand_means, 2.0);
         assert_eq!(row.receptor_means, 4.0);
-        assert_eq!(row.lr_means, 3.0);
+        assert_eq!(row.magnitude, 3.0);
         // with a single cell every permutation leaves the mean unchanged, so
         // every permutation ties the truth and the p-value saturates
-        assert_eq!(row.cellphone_pvals, 1.0);
+        assert_eq!(row.specificity, 1.0);
+
+        // the same frame through the geometric-mean scorer: gmean(2, 4)
+        let rows = run_geometric_mean(&adata, &resource, 0.05, 0, 1337, 4).unwrap();
+        let row = &rows[0];
+        assert!((row.magnitude - (2.0f32 * 4.0).sqrt()).abs() < 1e-6);
+        assert_eq!(row.specificity, 1.0);
     }
 
     fn row(subunit: usize, ligand_means: f32, receptor_means: f32) -> StatsRow {

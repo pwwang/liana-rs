@@ -59,16 +59,22 @@ pub fn means_cube(prep: &Prep, perms: &[u16], n_perms: usize) -> Vec<f64> {
 
 /// `_calculate_pvals` (`_get_mean_perms.py:367-397`) for the stacked
 /// `(2, n_perms, n_rows)` permutation statistic: the fraction of permutations
-/// whose combined ligand/receptor mean is at least the observed `truth`.
+/// whose combined ligand/receptor statistic is at least the observed `truth`.
 ///
 /// `ligand` and `receptor` are the two stacked statistics — what the caller
 /// selected as `perms[:, source, ligand]` and `perms[:, target, receptor]` —
-/// laid out `(n_rows, n_perms)` row-major. Their mean is `(ligand + receptor)
-/// / 2` in `f64`, matching `np.mean(stack, axis=0)`. A permutation counts when
-/// its mean is `>= truth` or within `rtol = 1e-6` of it — `np.isclose(...,
-/// atol=0.0)`, the tie tolerance of the `f32` scores — and the count is
-/// divided by `n_perms` in `f64`.
-pub fn pvals(ligand: &[f64], receptor: &[f64], truth: &[f32], n_perms: usize) -> Vec<f64> {
+/// laid out `(n_rows, n_perms)` row-major. `combine` is the method's scorer,
+/// what `_calculate_pvals` takes as `_score_fn` and applies to the stack's
+/// leading axis. A permutation counts when its statistic is `>= truth` or
+/// within `rtol = 1e-6` of it — `np.isclose(..., atol=0.0)`, the tie tolerance
+/// of the `f32` scores — and the count is divided by `n_perms` in `f64`.
+fn exceed_fraction(
+    ligand: &[f64],
+    receptor: &[f64],
+    truth: &[f32],
+    n_perms: usize,
+    combine: impl Fn(f64, f64) -> f64,
+) -> Vec<f64> {
     assert_eq!(ligand.len(), receptor.len(), "statistic shapes");
     assert_eq!(
         ligand.len() % n_perms,
@@ -87,13 +93,44 @@ pub fn pvals(ligand: &[f64], receptor: &[f64], truth: &[f32], n_perms: usize) ->
                 .iter()
                 .zip(other)
                 .filter(|&(&ligand, &receptor)| {
-                    let mean = (ligand + receptor) / 2.0;
-                    mean >= observed || (mean - observed).abs() <= TIE_RTOL * observed.abs()
+                    let stat = combine(ligand, receptor);
+                    stat >= observed || (stat - observed).abs() <= TIE_RTOL * observed.abs()
                 })
                 .count();
             exceeds as f64 / n_perms as f64
         })
         .collect()
+}
+
+/// `_calculate_pvals` with cellphonedb's `_score_fn`: the arithmetic mean of
+/// the two nulls, `np.mean(stack, axis=0)` (`method/sc/_cellphonedb.py:31-33`).
+pub fn pvals(ligand: &[f64], receptor: &[f64], truth: &[f32], n_perms: usize) -> Vec<f64> {
+    exceed_fraction(ligand, receptor, truth, n_perms, |ligand, receptor| {
+        (ligand + receptor) / 2.0
+    })
+}
+
+/// `_calculate_pvals` with geometric mean's `_score_fn`: scipy's `gmean` over
+/// the two nulls (`method/sc/_geometric_mean.py:31` → `_get_mean_perms.py:392`),
+/// i.e. `exp(mean(log(x)))` in `f64`, the nulls' dtype.
+pub fn gmean_pvals(ligand: &[f64], receptor: &[f64], truth: &[f32], n_perms: usize) -> Vec<f64> {
+    exceed_fraction(ligand, receptor, truth, n_perms, |ligand, receptor| {
+        ((ligand.ln() + receptor.ln()) / 2.0).exp()
+    })
+}
+
+/// scipy's `gmean` of one observed ligand/receptor mean pair, in `f32` — the
+/// `lr_gmeans` of `_gmean_score` (`method/sc/_geometric_mean.py:28`).
+///
+/// `gmean((ligand_means, receptor_means), axis=0)` runs on the two `f32`
+/// columns, and scipy keeps that dtype (`xp_result_type(a, weights,
+/// force_floating=True)`, `scipy/stats/_stats_py.py`), so the logs, the
+/// two-element mean and the exponential all evaluate in `f32`; the `f64` route
+/// cast back at the end differs from the oracle on 248 of the 440 rows. A zero
+/// mean logs to `-inf` and exponentiates back to `0.0`, which is what the
+/// oracle records for one.
+pub fn gmean32(ligand: f32, receptor: f32) -> f32 {
+    ((ligand.ln() + receptor.ln()) / 2.0).exp()
 }
 
 #[cfg(test)]
@@ -127,6 +164,15 @@ mod tests {
     fn cube_gathers_rows_by_position_label() {
         let cube = means_cube(&prep(), &[2, 1, 0], 1);
         assert_eq!(cube, [4.0, 1.0], "A = (5 + 3) / 2, B = 1");
+    }
+
+    /// A zero mean logs to `-inf`, so the geometric mean of a pair with one
+    /// zero side is exactly zero (no `NaN`, no mask needed).
+    #[test]
+    fn gmean32_zero_side_is_zero() {
+        assert_eq!(gmean32(0.0, 4.0), 0.0);
+        assert_eq!(gmean32(0.0, 0.0), 0.0);
+        assert!((gmean32(2.0, 8.0) - 4.0).abs() < 1e-6, "gmean(2, 8) = 4");
     }
 
     #[test]
