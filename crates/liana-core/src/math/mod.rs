@@ -1,5 +1,5 @@
 //! Bit-exact scalar ports of numpy 2.5.3's `f32` `log`/`exp` kernels and
-//! scipy 1.18.1's f64 `ndtr`.
+//! `f32` pairwise reductions, and scipy 1.18.1's f64 `ndtr`.
 //!
 //! numpy's `np.log`/`np.exp` on `f32` arrays do not call the platform libm:
 //! `loops_exponent_log.dispatch.c.src` (tag v2.5.3) defines `FLOAT_log` /
@@ -14,6 +14,10 @@
 //! The `ndtr` port (`ndtr.rs`) is scipy's cephes normal CDF, the kernel
 //! behind `scseqcomm`'s `*_cdf` columns (`scipy.stats.norm.cdf` through
 //! `_gene_cdf`, `method/sc/_liana_pipe.py:755-767`).
+//!
+//! The `pairwise` port (`pairwise.rs`) is numpy's `f32` pairwise reduction,
+//! `np.sum`/`np.std`, which back `scseqcomm`'s cluster statistics
+//! (`_cluster_stats`, `method/sc/_liana_pipe.py:742-751`).
 //!
 //! These ports are 1:1 transcriptions: same constants (as raw bit patterns),
 //! same operation order, `f32::mul_add` for every `_mm256_fmadd_ps` and plain
@@ -35,7 +39,9 @@
 pub mod expf;
 pub mod logf;
 pub mod ndtr;
+pub mod pairwise;
 
 pub use expf::expf;
 pub use logf::logf;
 pub use ndtr::ndtr;
+pub use pairwise::{std_f32, sum_f32};
