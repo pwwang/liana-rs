@@ -71,4 +71,4 @@ the synthetic fixture and diffs against the oracle CSVs at `rtol 0`.
 
 ## License
 
-BSD-3-Clause (see `LICENSE`). This project is an independent reimplementation; it vendors test fixtures from [scverse/liana](https://github.com/scverse/liana) (BSD-3-Clause) — see `testdata/FIXTURES.md` for provenance.
+MIT (see `LICENSE`). This project is an independent reimplementation; it vendors test fixtures from [scverse/liana](https://github.com/scverse/liana) (BSD-3-Clause) — see `testdata/FIXTURES.md` for provenance.

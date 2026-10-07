@@ -4,7 +4,7 @@ members = ["crates/liana-core", "crates/liana-cli", "crates/liana-py", "bench/en
 
 [workspace.package]
 edition = "2024"
-license = "BSD-3-Clause"
+license = "MIT"
 version = "0.1.0"
 
 [workspace.dependencies]
