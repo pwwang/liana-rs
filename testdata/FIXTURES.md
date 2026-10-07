@@ -70,8 +70,19 @@ rank_aggregate(toy_adata, groupby="bulk_labels", n_perms=2, seed=1337, inplace=F
 
 Both input constructors ship inside liana (`liana.datasets.generate_toy_adata`) or scanpy
 (`scanpy.datasets.pbmc68k_reduced`, which downloads/caches on first use), so all three
-golden outputs are regenerable without the liana git checkout. Reproducing them is the
-strongest available end-to-end parity check; see `ops/logs/w1a-report.md` for status.
+golden outputs are regenerable without the liana git checkout.
+
+**Verified (W1-A):** all three were regenerated from the pinned oracle with the recipes
+above and matched the vendored CSVs under liana's own test tolerances
+(`assert_frame_equal`, `rtol=1e-3` for the two `liana_pipe` tables, `rtol=1e-4`/`atol=1e-6`
+for `aggregate_rank_rest`). The inputs are therefore available offline, and these three
+CSVs are usable as true input→output golden pairs. See `ops/logs/w1a-report.md` (T3) for
+the exact commands.
+
+They are **not** wired into `scripts/oracle.sh`: that script's contract covers fixtures
+vendored as *input files* under `testdata/fixtures/`. Adopting the reconstructed
+`pbmc68k`/`toy_adata` inputs is a decision for the workstream that owns the Rust-side
+parity tests.
 
 ### Input — `synthetic.h5ad`
 
