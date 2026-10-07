@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use liana_core::io::{Adata, read_h5ad};
 use liana_core::pipe::{
     CONNECTOME_CSV_HEADER, CPDB_CSV_HEADER, GMEAN_CSV_HEADER, LOGFC_CSV_HEADER, LrRow,
-    run_cellphonedb, run_connectome, run_geometric_mean, run_logfc,
+    NATMI_CSV_HEADER, run_cellphonedb, run_connectome, run_geometric_mean, run_logfc, run_natmi,
 };
 use liana_core::resource::{self, LrPair};
 use serde::Deserialize;
@@ -50,6 +50,7 @@ enum Method {
     GeometricMean,
     Connectome,
     Logfc,
+    Natmi,
 }
 
 impl Method {
@@ -59,6 +60,7 @@ impl Method {
             Method::GeometricMean => "geometric_mean",
             Method::Connectome => "connectome",
             Method::Logfc => "logfc",
+            Method::Natmi => "natmi",
         }
     }
 
@@ -70,6 +72,7 @@ impl Method {
             Method::Cellphonedb | Method::GeometricMean => "cellphonedb",
             Method::Connectome => "connectome",
             Method::Logfc => "logfc",
+            Method::Natmi => "natmi",
         }
     }
 
@@ -79,6 +82,7 @@ impl Method {
             Method::GeometricMean => GMEAN_CSV_HEADER,
             Method::Connectome => CONNECTOME_CSV_HEADER,
             Method::Logfc => LOGFC_CSV_HEADER,
+            Method::Natmi => NATMI_CSV_HEADER,
         }
     }
 
@@ -107,6 +111,10 @@ impl Method {
                     .collect()
             }
             Method::Logfc => run_logfc(adata, resource, expr_prop, min_cells, seed, n_perms)?
+                .into_iter()
+                .map(|row| row.cells)
+                .collect(),
+            Method::Natmi => run_natmi(adata, resource, expr_prop, min_cells, seed, n_perms)?
                 .into_iter()
                 .map(|row| row.cells)
                 .collect(),
@@ -169,6 +177,11 @@ fn connectome_pipeline_matches_the_oracle_csv() {
 #[test]
 fn logfc_pipeline_matches_the_oracle_csv() {
     run_and_compare(Method::Logfc);
+}
+
+#[test]
+fn natmi_pipeline_matches_the_oracle_csv() {
+    run_and_compare(Method::Natmi);
 }
 
 fn run_and_compare(method: Method) {
@@ -306,7 +319,14 @@ fn compare(
 /// rest as strings.
 fn equal_field(column: &str, expected: &str, actual: &str) -> bool {
     match column {
-        "ligand_means" | "receptor_means" | "lr_means" | "lr_gmeans" | "expr_prod" => {
+        "ligand_means"
+        | "receptor_means"
+        | "lr_means"
+        | "lr_gmeans"
+        | "expr_prod"
+        | "ligand_means_sums"
+        | "receptor_means_sums"
+        | "spec_weight" => {
             expected.parse::<f32>().unwrap().to_bits() == actual.parse::<f32>().unwrap().to_bits()
         }
         "ligand_props" | "receptor_props" | "cellphone_pvals" | "gmean_pvals"

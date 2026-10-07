@@ -47,6 +47,11 @@ pub const LOGFC_CSV_HEADER: &str = "ligand,ligand_complex,ligand_logfc,ligand_me
                                    receptor,receptor_complex,receptor_logfc,receptor_means,\
                                    receptor_props,source,target,lr_logfc";
 
+/// The oracle CSV header of [`run_natmi`]'s rows.
+pub const NATMI_CSV_HEADER: &str = "ligand,ligand_complex,ligand_means,ligand_means_sums,ligand_props,\
+                                   receptor,receptor_complex,receptor_means,receptor_means_sums,\
+                                   receptor_props,source,target,expr_prod,spec_weight";
+
 /// One row of a non-permutation method's output: every cell as the oracle CSV
 /// writes it, in the oracle's column order — the frame's columns as
 /// `np.union1d` alphabetizes them, then the method's score columns, appended by
@@ -623,6 +628,110 @@ pub fn run_logfc(
     }
     scored.sort_by(|(left, _), (right, _)| right.partial_cmp(left).expect("lr_logfc is never NaN"));
     Ok(scored.into_iter().map(|(_, row)| row).collect())
+}
+
+/// The natmi run: `expr_prod` = the two subunit means' `f32` product and
+/// `spec_weight` = those means over their `*_means_sums` totals, in `f32`
+/// (`method/sc/_natmi.py:6-27`), sorted by `expr_prod` descending.
+/// `seed`/`n_perms` do not exist for it (`permute=False`).
+pub fn run_natmi(
+    adata: &Adata,
+    resource: &[LrPair],
+    expr_prop: f64,
+    min_cells: usize,
+    _seed: u64,
+    _n_perms: usize,
+) -> Result<Vec<Row>> {
+    let frame = frame(adata, resource, expr_prop, min_cells, false)?;
+    let ligand_sums = mean_sums(&frame, Side::Ligand);
+    let receptor_sums = mean_sums(&frame, Side::Receptor);
+
+    let mut scored: Vec<(f32, Row)> = Vec::with_capacity(frame.rows.len());
+    for (index, row) in frame.rows.iter().enumerate() {
+        let exploded = &frame.subunits[row.subunit];
+        let magnitude = row.ligand_means * row.receptor_means;
+        let specificity =
+            (row.ligand_means / ligand_sums[index]) * (row.receptor_means / receptor_sums[index]);
+        scored.push((
+            magnitude,
+            Row {
+                cells: vec![
+                    exploded.ligand.clone(),
+                    exploded.ligand_complex.clone(),
+                    row.ligand_means.to_string(),
+                    ligand_sums[index].to_string(),
+                    row.ligand_props.to_string(),
+                    exploded.receptor.clone(),
+                    exploded.receptor_complex.clone(),
+                    row.receptor_means.to_string(),
+                    receptor_sums[index].to_string(),
+                    row.receptor_props.to_string(),
+                    frame.prep.labels[row.source].clone(),
+                    frame.prep.labels[row.target].clone(),
+                    magnitude.to_string(),
+                    specificity.to_string(),
+                ],
+            },
+        ));
+    }
+    scored
+        .sort_by(|(left, _), (right, _)| right.partial_cmp(left).expect("expr_prod is never NaN"));
+    Ok(scored.into_iter().map(|(_, row)| row).collect())
+}
+
+/// The side of the pair a `_sum_means` pass totals — the ligand pass groups
+/// `P.complete` minus `source`, the receptor pass minus `target`
+/// (`_liana_pipe.py:180-183`).
+#[derive(Clone, Copy)]
+enum Side {
+    Ligand,
+    Receptor,
+}
+
+/// `_sum_means` (`_liana_pipe.py:604-606`): `lr_res.groupby(on)[what].sum()`
+/// joined back on `on`, so every row of a group carries the group's `f32`
+/// total, accumulated in the frame's row order.
+///
+/// A group is one (`ligand_complex`-pair, exploded ligand, exploded receptor)
+/// under a fixed target — the ligand pass — or source (the receptor pass); all
+/// of the other side's labels sit in it.
+fn mean_sums(frame: &Frame, side: Side) -> Vec<f32> {
+    let mut sums: HashMap<(usize, usize, String, String), f32> = HashMap::new();
+    for row in &frame.rows {
+        let exploded = &frame.subunits[row.subunit];
+        let fixed = match side {
+            Side::Ligand => row.target,
+            Side::Receptor => row.source,
+        };
+        let key = (
+            fixed,
+            row.pair,
+            exploded.ligand.clone(),
+            exploded.receptor.clone(),
+        );
+        let value = match side {
+            Side::Ligand => row.ligand_means,
+            Side::Receptor => row.receptor_means,
+        };
+        *sums.entry(key).or_insert(0.0) += value;
+    }
+    frame
+        .rows
+        .iter()
+        .map(|row| {
+            let exploded = &frame.subunits[row.subunit];
+            let fixed = match side {
+                Side::Ligand => row.target,
+                Side::Receptor => row.source,
+            };
+            sums[&(
+                fixed,
+                row.pair,
+                exploded.ligand.clone(),
+                exploded.receptor.clone(),
+            )]
+        })
+        .collect()
 }
 
 /// `_calc_log2fc` (`_liana_pipe.py:583-596`) per label, `labels.len() *
