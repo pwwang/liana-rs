@@ -1,4 +1,5 @@
-//! Bit-exact scalar ports of numpy 2.5.3's `f32` `log`/`exp` kernels.
+//! Bit-exact scalar ports of numpy 2.5.3's `f32` `log`/`exp` kernels and
+//! scipy 1.18.1's f64 `ndtr`.
 //!
 //! numpy's `np.log`/`np.exp` on `f32` arrays do not call the platform libm:
 //! `loops_exponent_log.dispatch.c.src` (tag v2.5.3) defines `FLOAT_log` /
@@ -9,6 +10,10 @@
 //! polynomial, constants in `npy_simd_data.h`. Google Highway is not
 //! involved: numpy vendors it only for qsort, trigonometric, hyperbolic and
 //! logical loops.
+//!
+//! The `ndtr` port (`ndtr.rs`) is scipy's cephes normal CDF, the kernel
+//! behind `scseqcomm`'s `*_cdf` columns (`scipy.stats.norm.cdf` through
+//! `_gene_cdf`, `method/sc/_liana_pipe.py:755-767`).
 //!
 //! These ports are 1:1 transcriptions: same constants (as raw bit patterns),
 //! same operation order, `f32::mul_add` for every `_mm256_fmadd_ps` and plain
@@ -29,6 +34,8 @@
 
 pub mod expf;
 pub mod logf;
+pub mod ndtr;
 
 pub use expf::expf;
 pub use logf::logf;
+pub use ndtr::ndtr;
