@@ -1,0 +1,112 @@
+{
+  "liana_version": "2.0.0",
+  "liana_commit": "c59472ccc9de8360dbbf5016db75f8abde08dd3e",
+  "csv": "liana/resource/omni_resource.csv",
+  "csv_sha256": "65e46a428818c0600de66c1574c94ff2f5dc80859998321c03a956d330dd67fb",
+  "n_csv_rows": 35356,
+  "n_resources": 17,
+  "resources": {
+    "baccin2019": {
+      "n_pairs": 1648,
+      "n_unique_ligands": 647,
+      "n_unique_receptors": 616,
+      "sha256_pairs_ordered": "913bce19869f90e934284dfdd04d4fc0bddbd7b778ec077dab1a2f8403d01857"
+    },
+    "cellcall": {
+      "n_pairs": 1123,
+      "n_unique_ligands": 276,
+      "n_unique_receptors": 219,
+      "sha256_pairs_ordered": "1f217081b6d94555e29bd5b93621e90235970ef6bdad4505f3f82e347525a364"
+    },
+    "cellchatdb": {
+      "n_pairs": 1912,
+      "n_unique_ligands": 529,
+      "n_unique_receptors": 490,
+      "sha256_pairs_ordered": "35fb5b5f70ee6960fc071d7c6b502e93fb56084270b59954c7cbeca4b2da8fa3"
+    },
+    "cellinker": {
+      "n_pairs": 3700,
+      "n_unique_ligands": 1218,
+      "n_unique_receptors": 1105,
+      "sha256_pairs_ordered": "852188f6ee3cb2ddef02c94072b2f734d896d7a9b8c45e36ecf0a4c3d6a60751"
+    },
+    "cellphonedb": {
+      "n_pairs": 1223,
+      "n_unique_ligands": 500,
+      "n_unique_receptors": 451,
+      "sha256_pairs_ordered": "59a5698e539c70652bbbb0bb61e7e734fcf1c39a7c74efc9a9cf199da32e1930"
+    },
+    "celltalkdb": {
+      "n_pairs": 3392,
+      "n_unique_ligands": 811,
+      "n_unique_receptors": 780,
+      "sha256_pairs_ordered": "be7911a517c99011a331f85b334f2e3d89c83888393f5e20ad6b85be6fdb3388"
+    },
+    "connectomedb2020": {
+      "n_pairs": 2266,
+      "n_unique_ligands": 812,
+      "n_unique_receptors": 681,
+      "sha256_pairs_ordered": "cb5c1ff71ed53f67fe8c4cce7f055b878c550cd29e7e8058c62a59c7cd7c3799"
+    },
+    "consensus": {
+      "n_pairs": 4620,
+      "n_unique_ligands": 1026,
+      "n_unique_receptors": 1053,
+      "sha256_pairs_ordered": "0340ee9582ecaf9d335b6ec1e2fea59dd2a74668262fb9262a98fa276e693dc7"
+    },
+    "embrace": {
+      "n_pairs": 1650,
+      "n_unique_ligands": 462,
+      "n_unique_receptors": 473,
+      "sha256_pairs_ordered": "fcc610dd686a745b220554d315db20efcb4130c00865df906e959a858146336c"
+    },
+    "guide2pharma": {
+      "n_pairs": 665,
+      "n_unique_ligands": 293,
+      "n_unique_receptors": 243,
+      "sha256_pairs_ordered": "e5acf0c5931a65300ecfa397773b51543707644a392e137a70c24c14bd40407b"
+    },
+    "hpmr": {
+      "n_pairs": 595,
+      "n_unique_ligands": 365,
+      "n_unique_receptors": 492,
+      "sha256_pairs_ordered": "8f3d74f08c6903391e32d431e6ad4d4e499e0004129d959c1f38a02cfbb632ae"
+    },
+    "icellnet": {
+      "n_pairs": 738,
+      "n_unique_ligands": 317,
+      "n_unique_receptors": 264,
+      "sha256_pairs_ordered": "8f1302151951c4454248da559fe4f3056efd8407ca0528564fc3d57a19efd82d"
+    },
+    "italk": {
+      "n_pairs": 2566,
+      "n_unique_ligands": 713,
+      "n_unique_receptors": 699,
+      "sha256_pairs_ordered": "132fce010cbd622f74b537c5ea4c920c9a3e1402e837ad7f2421b54e8a8a736b"
+    },
+    "kirouac2010": {
+      "n_pairs": 152,
+      "n_unique_ligands": 143,
+      "n_unique_receptors": 81,
+      "sha256_pairs_ordered": "b137103d064285b0291a15c7814caf246eae7da900624fcbe1a18a0ba055cda0"
+    },
+    "lrdb": {
+      "n_pairs": 3228,
+      "n_unique_ligands": 800,
+      "n_unique_receptors": 745,
+      "sha256_pairs_ordered": "9727120b63e95d5c88d7cabdc54d31ff1bce6e9b528bb42f0e3954310c05bff2"
+    },
+    "mouseconsensus": {
+      "n_pairs": 3989,
+      "n_unique_ligands": 878,
+      "n_unique_receptors": 907,
+      "sha256_pairs_ordered": "5f62b6520e505e9d996e19e3c94e5a9838feadfca64e626016371b9e7e4339e5"
+    },
+    "ramilowski2015": {
+      "n_pairs": 1889,
+      "n_unique_ligands": 638,
+      "n_unique_receptors": 589,
+      "sha256_pairs_ordered": "34611c0ffd73ad31516df34eb74a21c3656c46069099442100e5c03a8e156039"
+    }
+  }
+}
