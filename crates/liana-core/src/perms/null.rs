@@ -113,6 +113,11 @@ pub fn pvals(ligand: &[f64], receptor: &[f64], truth: &[f32], n_perms: usize) ->
 /// `_calculate_pvals` with geometric mean's `_score_fn`: scipy's `gmean` over
 /// the two nulls (`method/sc/_geometric_mean.py:31` → `_get_mean_perms.py:392`),
 /// i.e. `exp(mean(log(x)))` in `f64`, the nulls' dtype.
+///
+/// The `f64` route stays on the platform libm: numpy's `DOUBLE_log`/`DOUBLE_exp`
+/// only go vectorized through SVML under AVX-512 (absent here), otherwise they
+/// call `npy_log`/`npy_exp` — the same glibc Rust's `f64::ln`/`exp` reach, so
+/// this needs no port (unlike the `f32` kernels in [`crate::math`]).
 pub fn gmean_pvals(ligand: &[f64], receptor: &[f64], truth: &[f32], n_perms: usize) -> Vec<f64> {
     exceed_fraction(ligand, receptor, truth, n_perms, |ligand, receptor| {
         ((ligand.ln() + receptor.ln()) / 2.0).exp()
@@ -125,12 +130,14 @@ pub fn gmean_pvals(ligand: &[f64], receptor: &[f64], truth: &[f32], n_perms: usi
 /// `gmean((ligand_means, receptor_means), axis=0)` runs on the two `f32`
 /// columns, and scipy keeps that dtype (`xp_result_type(a, weights,
 /// force_floating=True)`, `scipy/stats/_stats_py.py`), so the logs, the
-/// two-element mean and the exponential all evaluate in `f32`; the `f64` route
-/// cast back at the end differs from the oracle on 248 of the 440 rows. A zero
-/// mean logs to `-inf` and exponentiates back to `0.0`, which is what the
-/// oracle records for one.
+/// two-element mean and the exponential all evaluate in `f32` through numpy's
+/// own kernels — Rust's libm disagrees with them by up to 4 ulp, so the log
+/// and exp come from [`crate::math`], the bit-exact ports (W3 D2 closed). The
+/// `f64` route cast back at the end differs from the oracle on 248 of the 440
+/// rows. A zero mean logs to `-inf` and exponentiates back to `0.0`, which is
+/// what the oracle records for one.
 pub fn gmean32(ligand: f32, receptor: f32) -> f32 {
-    ((ligand.ln() + receptor.ln()) / 2.0).exp()
+    crate::math::expf((crate::math::logf(ligand) + crate::math::logf(receptor)) / 2.0)
 }
 
 #[cfg(test)]

@@ -7,14 +7,10 @@
 # scripts/parity_diff.py, keyed on the four key columns (the row order is not
 # part of the contract; see ops/logs/w3-report.md).
 #
-# Tolerances: cellphonedb and cellchat are value-exact, so their cross-checks
-# run at rtol=0.
-# For geometric_mean, `lr_gmeans` is the one column the Rust side cannot make
-# bit-exact — numpy 2.5.3 evaluates `exp((log l + log r)/2)` in f32 through
-# Google Highway's kernels, which differ from Rust's libm on 182/440 rows by
-# up to 4 ulp (2.34e-7 relative, measured); the Rust test pins that count and
-# bound, and this looser cross-check bound (still below liana's own 1e-6 tie
-# rtol) covers it. All other gmean columns are bit-exact in that test.
+# Tolerances: all three methods are value-exact, so every cross-check runs at
+# rtol=0. geometric_mean's `lr_gmeans` (`exp((log l + log r)/2)` in f32
+# through numpy's kernels) used to be the exception at rtol 5e-7 (W3 D2);
+# `crates/liana-core/src/math/` now ports those kernels bit-exactly.
 #
 # Usage: scripts/check_pipe_parity.sh
 set -euo pipefail
@@ -38,5 +34,5 @@ for n in 100 1000; do
     python3 scripts/parity_diff.py \
         --expected "testdata/expected/synthetic__geometric_mean__p${n}.csv" \
         --actual "target/pipe_out/synthetic__geometric_mean__p${n}.csv" \
-        --rtol 5e-7
+        --rtol 0
 done

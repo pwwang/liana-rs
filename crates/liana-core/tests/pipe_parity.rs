@@ -51,39 +51,7 @@ fn key_of(row: &LrRow) -> Key {
     )
 }
 
-/// A tolerance policy for one output column that cannot be bit-exact:
-/// `max_ulp` bounds every row's `f32` gap and `rows` pins how many rows may
-/// diverge at all, so the policy cannot widen unnoticed.
-#[derive(Clone, Copy)]
-struct UlpPolicy {
-    rows: usize,
-    max_ulp: u32,
-}
-
-/// `lr_gmeans` is the one column that is not bit-reproducible: it is
-/// `exp((log(l) + log(r))/2)` evaluated in `f32` (`_geometric_mean.py:28`),
-/// i.e. through numpy 2.5.3's own `f32` `log`/`exp` kernels — on this
-/// X86_V3 (AVX2+FMA3) build, Google Highway's — whose rounding differs from
-/// Rust's libm on 182 of the 440 pairs (gap histogram 1 ulp x178, 2 x2, 4 x2;
-/// each log's error can propagate through the mean and the `exp`).
-///
-/// Everything else — including the `f64` `gmean_pvals`, whose `>= observed`
-/// comparisons absorb the gap under `_TIE_RTOL` — is bit-exact.
-///
-/// TODO: port numpy 2.5.3's highway `Log`/`Exp` for `f32` and drop this
-/// policy (the count then becomes 0 and the column becomes exact). The
-/// pinned count is measured against the oracle, so any drift trips it; the
-/// gap is documented in `ops/logs/w3-report.md`.
-const GMEAN_POLICY: &[(&str, UlpPolicy)] = &[(
-    "lr_gmeans",
-    UlpPolicy {
-        rows: 182,
-        max_ulp: 4,
-    },
-)];
-
-/// The method under test: its runner, its CSV contract and its comparison
-/// policy.
+/// The method under test: its runner and its CSV contract.
 #[derive(Clone, Copy)]
 enum Method {
     Cellphonedb,
@@ -102,13 +70,6 @@ impl Method {
         match self {
             Method::Cellphonedb => CPDB_CSV_HEADER,
             Method::GeometricMean => GMEAN_CSV_HEADER,
-        }
-    }
-
-    fn policy(self) -> &'static [(&'static str, UlpPolicy)] {
-        match self {
-            Method::Cellphonedb => &[],
-            Method::GeometricMean => GMEAN_POLICY,
         }
     }
 
@@ -215,8 +176,8 @@ fn run_and_compare(method: Method) {
 }
 
 /// Exact keyed comparison of the oracle CSV and the produced rows, reporting
-/// the first diverging row/column with both values; the columns of the
-/// method's policy may diverge within their stated bound.
+/// the first diverging row/column with both values. Every column of every
+/// method is compared by bit.
 fn compare(expected_path: &Path, method: Method, rows: &[LrRow], oracle_rows: usize, n: &str) {
     let name = method.name();
     let (header, expected_rows) = read_csv(expected_path);
@@ -272,63 +233,20 @@ fn compare(expected_path: &Path, method: Method, rows: &[LrRow], oracle_rows: us
         extra.first(),
     );
 
-    // (diverging rows, worst ulp gap) per policy column.
-    let mut gaps = vec![(0usize, 0u32); method.policy().len()];
     for (key, expected_row) in &expected {
         let actual_fields = row_fields(actual[key]);
         for (index, column_name) in header.iter().enumerate() {
             let expected_field = &expected_row[index];
             let actual_field = &actual_fields[index];
-            match method
-                .policy()
-                .iter()
-                .position(|(policy_column, _)| policy_column == column_name)
-            {
-                None => {
-                    if !equal_field(column_name, expected_field, actual_field) {
-                        panic!(
-                            "{name} p{n}: first divergence at source={} target={} \
-                             ligand_complex={} receptor_complex={} column={column_name}: \
-                             expected {expected_field:?} got {actual_field:?}",
-                            key.0, key.1, key.2, key.3,
-                        );
-                    }
-                }
-                Some(policy_index) => {
-                    let policy = method.policy()[policy_index].1;
-                    let expected: f32 = expected_field.parse().unwrap();
-                    let actual: f32 = actual_field.parse().unwrap();
-                    if expected.to_bits() != actual.to_bits() {
-                        let gap = (i64::from(expected.to_bits()) - i64::from(actual.to_bits()))
-                            .unsigned_abs() as u32;
-                        assert!(
-                            gap <= policy.max_ulp,
-                            "{name} p{n}: column {column_name} at source={} target={} \
-                             ligand_complex={} receptor_complex={} diverges by {gap} ulp \
-                             (allowed {}) : expected {expected:?} got {actual:?}",
-                            key.0,
-                            key.1,
-                            key.2,
-                            key.3,
-                            policy.max_ulp,
-                        );
-                        gaps[policy_index].0 += 1;
-                        gaps[policy_index].1 = gaps[policy_index].1.max(gap);
-                    }
-                }
+            if !equal_field(column_name, expected_field, actual_field) {
+                panic!(
+                    "{name} p{n}: first divergence at source={} target={} \
+                     ligand_complex={} receptor_complex={} column={column_name}: \
+                     expected {expected_field:?} got {actual_field:?}",
+                    key.0, key.1, key.2, key.3,
+                );
             }
         }
-    }
-
-    for (policy_index, (policy_column, policy)) in method.policy().iter().enumerate() {
-        let (rows, max_gap) = gaps[policy_index];
-        assert_eq!(
-            rows, policy.rows,
-            "{name} p{n}: rows diverging in {policy_column}: worst gap {max_gap} ulp (allowed \
-             {}); the pinned count is measured against the oracle — TODO says to drop the policy \
-             when numpy's f32 kernel is ported",
-            policy.max_ulp,
-        );
     }
 }
 
