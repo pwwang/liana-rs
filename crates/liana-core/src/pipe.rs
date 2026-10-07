@@ -11,8 +11,8 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Result, bail};
 
 use crate::io::Adata;
-use crate::perms::null::{gmean_pvals, gmean32, means_cube, pvals};
-use crate::perms::rng::permutation_matrix;
+use crate::perms::engine::{self, RowSel};
+use crate::perms::null::gmean32;
 use crate::prep::{self, Prep};
 use crate::resource::{self, LrPair, LrSubunit};
 
@@ -97,17 +97,16 @@ fn key_of(row: &StatsRow) -> Key {
 }
 
 /// The shared front half of a permutation-scored method: `_prepare_lr_stats`'
-/// reassembled row frame plus `_run_method`'s permutation nulls, ready for a
-/// scorer to combine.
+/// reassembled row frame plus each row's `_run_method` permutation selection,
+/// ready for a scorer and the streaming null engine.
 struct Frame {
     prep: Prep,
     /// The surviving exploded subunits; `rows[i].subunit` names row `i`'s genes.
     subunits: Vec<LrSubunit>,
     rows: Vec<StatsRow>,
-    /// The `perms[:, source, ligand]` / `perms[:, target, receptor]` selections
-    /// `_run_method` stacks, `(n_rows, n_perms)` row-major.
-    ligand_nulls: Vec<f64>,
-    receptor_nulls: Vec<f64>,
+    /// The `perms[:, source, ligand]` / `perms[:, target, receptor]`
+    /// coordinates `_run_method` selects.
+    sel: Vec<RowSel>,
 }
 
 impl Frame {
@@ -155,20 +154,11 @@ impl Frame {
     }
 }
 
-/// `_prepare_lr_stats` + reassembly + `_run_method`'s nulls, shared by the
-/// permutation-scored methods.
+/// `_prepare_lr_stats` + reassembly, shared by the permutation-scored methods.
 ///
 /// `expr_prop` and `min_cells` are liana's `expr_prop` (as in
-/// `_filter_reassemble_complexes`) and the `min_cells` of `prep_check_adata`;
-/// `seed` and `n_perms` drive the permutation null.
-fn frame(
-    adata: &Adata,
-    resource: &[LrPair],
-    expr_prop: f64,
-    min_cells: usize,
-    seed: u64,
-    n_perms: usize,
-) -> Result<Frame> {
+/// `_filter_reassemble_complexes`) and the `min_cells` of `prep_check_adata`.
+fn frame(adata: &Adata, resource: &[LrPair], expr_prop: f64, min_cells: usize) -> Result<Frame> {
     let prep = prep::prepare(adata, min_cells)?;
 
     // A passed resource is deduplicated on its pair columns, first occurrence
@@ -229,32 +219,24 @@ fn frame(
 
     reassemble(&mut rows, expr_prop)?;
 
-    // `_run_method` (`_liana_pipe.py:674-693`): the permutation cube and each
-    // row's ligand/receptor nulls.
-    let perms = permutation_matrix(seed, prep.x.n_rows, n_perms);
-    let cube = means_cube(&prep, &perms, n_perms);
-    let (n_labels, n_vars) = (prep.n_labels(), prep.n_vars());
-
-    let mut ligand_nulls = vec![0f64; rows.len() * n_perms];
-    let mut receptor_nulls = vec![0f64; rows.len() * n_perms];
-    for (row_index, row) in rows.iter().enumerate() {
+    // `_run_method`'s selection (`_liana_pipe.py:682-686`): the cube
+    // coordinates each row scores against, resolved once.
+    let mut sel = Vec::with_capacity(rows.len());
+    for row in &rows {
         let exploded = &subunits[row.subunit];
-        let ligand = gene_index(&prep, &exploded.ligand, "ligand")?;
-        let receptor = gene_index(&prep, &exploded.receptor, "receptor")?;
-        for p in 0..n_perms {
-            ligand_nulls[row_index * n_perms + p] =
-                cube[(p * n_labels + row.source) * n_vars + ligand];
-            receptor_nulls[row_index * n_perms + p] =
-                cube[(p * n_labels + row.target) * n_vars + receptor];
-        }
+        sel.push(RowSel {
+            source: row.source as u32,
+            target: row.target as u32,
+            ligand: gene_index(&prep, &exploded.ligand, "ligand")? as u32,
+            receptor: gene_index(&prep, &exploded.receptor, "receptor")? as u32,
+        });
     }
 
     Ok(Frame {
         prep,
         subunits,
         rows,
-        ligand_nulls,
-        receptor_nulls,
+        sel,
     })
 }
 
@@ -269,7 +251,7 @@ pub fn run_cellphonedb(
     seed: u64,
     n_perms: usize,
 ) -> Result<Vec<LrRow>> {
-    let frame = frame(adata, resource, expr_prop, min_cells, seed, n_perms)?;
+    let frame = frame(adata, resource, expr_prop, min_cells)?;
 
     // `_cpdb_score`: zero_msk = either subunit mean zero (`_cellphonedb.py:22-26`)
     let magnitudes: Vec<f32> = frame
@@ -283,11 +265,15 @@ pub fn run_cellphonedb(
             }
         })
         .collect();
-    let specificities = pvals(
-        &frame.ligand_nulls,
-        &frame.receptor_nulls,
-        &magnitudes,
+    let truth: Vec<f64> = magnitudes.iter().map(|&m| f64::from(m)).collect();
+    let specificities = engine::pvals_streaming(
+        &frame.prep,
+        &frame.sel,
+        &truth,
+        seed,
         n_perms,
+        0,
+        |ligand, receptor| (ligand + receptor) / 2.0,
     );
     Ok(frame.finish(&magnitudes, specificities))
 }
@@ -303,17 +289,21 @@ pub fn run_geometric_mean(
     seed: u64,
     n_perms: usize,
 ) -> Result<Vec<LrRow>> {
-    let frame = frame(adata, resource, expr_prop, min_cells, seed, n_perms)?;
+    let frame = frame(adata, resource, expr_prop, min_cells)?;
     let magnitudes: Vec<f32> = frame
         .rows
         .iter()
         .map(|row| gmean32(row.ligand_means, row.receptor_means))
         .collect();
-    let specificities = gmean_pvals(
-        &frame.ligand_nulls,
-        &frame.receptor_nulls,
-        &magnitudes,
+    let truth: Vec<f64> = magnitudes.iter().map(|&m| f64::from(m)).collect();
+    let specificities = engine::pvals_streaming(
+        &frame.prep,
+        &frame.sel,
+        &truth,
+        seed,
         n_perms,
+        0,
+        |ligand, receptor| ((ligand.ln() + receptor.ln()) / 2.0).exp(),
     );
     Ok(frame.finish(&magnitudes, specificities))
 }

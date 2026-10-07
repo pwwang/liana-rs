@@ -8,7 +8,7 @@ use crate::prep::Prep;
 
 /// `_TIE_RTOL` (`_get_mean_perms.py:38`): how close a permuted mean has to be
 /// to the observed one to count as tied with it.
-const TIE_RTOL: f64 = 1e-6;
+pub(crate) const TIE_RTOL: f64 = 1e-6;
 
 /// The `(n_perms, n_labels, n_vars)` cube of per-cluster permuted means,
 /// row-major — `_generate_perms_cube` with `aggregation="mean"`

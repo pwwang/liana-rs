@@ -188,25 +188,47 @@ impl Pcg64 {
     }
 }
 
-/// The `(n_perms, n_obs)` permutation matrix `_chunk_permutations` yields.
+/// The permutation stream `_chunk_permutations` draws, yielded a block at a
+/// time so a consumer that takes the permutations in order never holds more
+/// than one block.
 ///
 /// `numpy.min_scalar_type(n_obs - 1)` is `uint16` for every size liana's
 /// reference configs use; // ponytail: u16-only, widen if n_obs > 65536.
-pub fn permutation_matrix(seed: u64, n_obs: usize, n_perms: usize) -> Vec<u16> {
-    assert!(
-        n_obs <= u16::MAX as usize + 1,
-        "n_obs {n_obs} does not fit u16"
-    );
-    let template: Vec<u32> = (0..n_obs as u32).collect();
-    let mut rng = Pcg64::from_seed(seed);
-    let mut idx = template.clone();
-    let mut out = Vec::with_capacity(n_obs * n_perms);
-    for _ in 0..n_perms {
-        idx.copy_from_slice(&template);
-        rng.shuffle(&mut idx);
-        out.extend(idx.iter().map(|&v| v as u16));
+pub struct PermsStream {
+    rng: Pcg64,
+    template: Vec<u32>,
+    idx: Vec<u32>,
+}
+
+impl PermsStream {
+    pub fn new(seed: u64, n_obs: usize) -> Self {
+        assert!(
+            n_obs <= u16::MAX as usize + 1,
+            "n_obs {n_obs} does not fit u16"
+        );
+        let template: Vec<u32> = (0..n_obs as u32).collect();
+        Self {
+            rng: Pcg64::from_seed(seed),
+            idx: template.clone(),
+            template,
+        }
     }
-    out
+
+    /// The next `block` permutations, `(block, n_obs)` row-major `u16`.
+    pub fn next_block(&mut self, block: usize) -> Vec<u16> {
+        let mut out = Vec::with_capacity(self.template.len() * block);
+        for _ in 0..block {
+            self.idx.copy_from_slice(&self.template);
+            self.rng.shuffle(&mut self.idx);
+            out.extend(self.idx.iter().map(|&v| v as u16));
+        }
+        out
+    }
+}
+
+/// The `(n_perms, n_obs)` permutation matrix `_chunk_permutations` yields.
+pub fn permutation_matrix(seed: u64, n_obs: usize, n_perms: usize) -> Vec<u16> {
+    PermsStream::new(seed, n_obs).next_block(n_perms)
 }
 
 #[cfg(test)]
@@ -301,6 +323,11 @@ mod tests {
             vec![7_u16, 6, 3, 5, 2, 8, 4, 9, 0, 1]
         );
         assert_eq!(permutation_matrix(1, 5, 1), vec![4_u16, 0, 1, 2, 3]);
+        // a block-wise draw is the same stream, whatever the block size
+        let mut stream = PermsStream::new(0, 10);
+        let mut blocked = stream.next_block(1);
+        blocked.extend(stream.next_block(2));
+        assert_eq!(blocked, permutation_matrix(0, 10, 3));
         assert_eq!(
             permutation_matrix(0, 128, 1)[..24].to_vec(),
             vec![
