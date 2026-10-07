@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use liana_core::io::{Adata, read_h5ad};
 use liana_core::pipe::{
     CONNECTOME_CSV_HEADER, CPDB_CSV_HEADER, GMEAN_CSV_HEADER, LOGFC_CSV_HEADER, LrRow,
-    NATMI_CSV_HEADER, SCSEQCOMM_CSV_HEADER, run_cellphonedb, run_connectome, run_geometric_mean,
-    run_logfc, run_natmi, run_scseqcomm,
+    NATMI_CSV_HEADER, SCSEQCOMM_CSV_HEADER, SINGLECELLSIGNALR_CSV_HEADER, run_cellphonedb,
+    run_connectome, run_geometric_mean, run_logfc, run_natmi, run_scseqcomm, run_singlecellsignalr,
 };
 use liana_core::resource::{self, LrPair};
 use serde::Deserialize;
@@ -53,6 +53,7 @@ enum Method {
     Logfc,
     Natmi,
     Scseqcomm,
+    Singlecellsignalr,
 }
 
 impl Method {
@@ -64,6 +65,7 @@ impl Method {
             Method::Logfc => "logfc",
             Method::Natmi => "natmi",
             Method::Scseqcomm => "scseqcomm",
+            Method::Singlecellsignalr => "singlecellsignalr",
         }
     }
 
@@ -77,6 +79,7 @@ impl Method {
             Method::Logfc => "logfc",
             Method::Natmi => "natmi",
             Method::Scseqcomm => "scseqcomm",
+            Method::Singlecellsignalr => "singlecellsignalr",
         }
     }
 
@@ -88,6 +91,7 @@ impl Method {
             Method::Logfc => LOGFC_CSV_HEADER,
             Method::Natmi => NATMI_CSV_HEADER,
             Method::Scseqcomm => SCSEQCOMM_CSV_HEADER,
+            Method::Singlecellsignalr => SINGLECELLSIGNALR_CSV_HEADER,
         }
     }
 
@@ -125,6 +129,12 @@ impl Method {
                 .collect(),
             Method::Scseqcomm => {
                 run_scseqcomm(adata, resource, expr_prop, min_cells, seed, n_perms)?
+                    .into_iter()
+                    .map(|row| row.cells)
+                    .collect()
+            }
+            Method::Singlecellsignalr => {
+                run_singlecellsignalr(adata, resource, expr_prop, min_cells, seed, n_perms)?
                     .into_iter()
                     .map(|row| row.cells)
                     .collect()
@@ -198,6 +208,11 @@ fn natmi_pipeline_matches_the_oracle_csv() {
 #[test]
 fn scseqcomm_pipeline_matches_the_oracle_csv() {
     run_and_compare(Method::Scseqcomm);
+}
+
+#[test]
+fn singlecellsignalr_pipeline_matches_the_oracle_csv() {
+    run_and_compare(Method::Singlecellsignalr);
 }
 
 fn run_and_compare(method: Method) {
@@ -342,7 +357,9 @@ fn equal_field(column: &str, expected: &str, actual: &str) -> bool {
         | "expr_prod"
         | "ligand_means_sums"
         | "receptor_means_sums"
-        | "spec_weight" => {
+        | "spec_weight"
+        | "mat_mean"
+        | "lrscore" => {
             expected.parse::<f32>().unwrap().to_bits() == actual.parse::<f32>().unwrap().to_bits()
         }
         "ligand_props" | "receptor_props" | "cellphone_pvals" | "gmean_pvals"

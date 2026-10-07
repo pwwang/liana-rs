@@ -58,6 +58,11 @@ pub const SCSEQCOMM_CSV_HEADER: &str = "ligand,ligand_cdf,ligand_complex,ligand_
                                         receptor,receptor_cdf,receptor_complex,receptor_means,\
                                         receptor_props,source,target,inter_score";
 
+/// The oracle CSV header of [`run_singlecellsignalr`]'s rows.
+pub const SINGLECELLSIGNALR_CSV_HEADER: &str = "ligand,ligand_complex,ligand_means,ligand_props,\
+                                               mat_mean,receptor,receptor_complex,\
+                                               receptor_means,receptor_props,source,target,lrscore";
+
 /// One row of a non-permutation method's output: every cell as the oracle CSV
 /// writes it, in the oracle's column order — the frame's columns as
 /// `np.union1d` alphabetizes them, then the method's score columns, appended by
@@ -750,26 +755,72 @@ pub fn run_scseqcomm(
     Ok(scored.into_iter().map(|(_, row)| row).collect())
 }
 
+/// The singlecellsignalr run: `lrscore` = `sqrt(l) * sqrt(r)` over that plus
+/// `mat_mean` (`method/sc/_singlecellsignalr.py:6-24`, its magnitude,
+/// descending) — all `f32`, so the two roots and the division are `f32` too.
+/// `seed`/`n_perms` do not exist for it (`permute=False`).
+pub fn run_singlecellsignalr(
+    adata: &Adata,
+    resource: &[LrPair],
+    expr_prop: f64,
+    min_cells: usize,
+    _seed: u64,
+    _n_perms: usize,
+) -> Result<Vec<Row>> {
+    let frame = frame(adata, resource, expr_prop, min_cells, false)?;
+    let mat_mean = mat_mean(&frame.prep);
+
+    let mut scored: Vec<(f32, Row)> = Vec::with_capacity(frame.rows.len());
+    for row in &frame.rows {
+        let exploded = &frame.subunits[row.subunit];
+        let lr_sqrt = row.ligand_means.sqrt() * row.receptor_means.sqrt();
+        let lrscore = lr_sqrt / (lr_sqrt + mat_mean);
+        scored.push((
+            lrscore,
+            Row {
+                cells: vec![
+                    exploded.ligand.clone(),
+                    exploded.ligand_complex.clone(),
+                    row.ligand_means.to_string(),
+                    row.ligand_props.to_string(),
+                    mat_mean.to_string(),
+                    exploded.receptor.clone(),
+                    exploded.receptor_complex.clone(),
+                    row.receptor_means.to_string(),
+                    row.receptor_props.to_string(),
+                    frame.prep.labels[row.source].clone(),
+                    frame.prep.labels[row.target].clone(),
+                    lrscore.to_string(),
+                ],
+            },
+        ));
+    }
+    scored.sort_by(|(left, _), (right, _)| right.partial_cmp(left).expect("lrscore is never NaN"));
+    Ok(scored.into_iter().map(|(_, row)| row).collect())
+}
+
 /// `_cluster_stats` (`_liana_pipe.py:742-751`): each cluster's scalar mean
 /// and standard deviation over the prepared matrix, both `f32`.
 ///
-/// The mean is scipy's sparse `mean(axis=None)`: every stored value scaled by
-/// `1 / (cells * vars)` in `f32`, accumulated in numpy's pairwise order over
-/// the rows. The deviation is `np.std` of the cluster's *dense* block — the
-/// implicit zeros included, flattened row-major — which is numpy's `f32`
-/// pairwise mean and squared-deviation sum (`math::pairwise`).
+/// The mean is scipy's sparse `mean(axis=None)` ([`sparse_mean`]). The
+/// deviation is `np.std` of the cluster's *dense* block — the implicit zeros
+/// included, flattened row-major — which is numpy's `f32` pairwise mean and
+/// squared-deviation sum (`math::pairwise`).
 fn cluster_stats(prep: &Prep) -> (Vec<f32>, Vec<f32>) {
     let n_vars = prep.n_vars();
     let mut means = vec![0.0f32; prep.n_labels()];
     let mut stds = vec![0.0f32; prep.n_labels()];
     for cluster in 0..prep.n_labels() {
         let scale = (1.0f64 / (prep.counts[cluster] * n_vars) as f64) as f32;
-        let mut scaled = Vec::new();
+        let is_cluster = |row: usize| prep.cell_cluster[row] as usize == cluster;
+        means[cluster] = sparse_mean(
+            prep,
+            scale,
+            (0..prep.x.n_rows).filter(|&row| is_cluster(row)),
+        );
+
         let mut dense = Vec::with_capacity(prep.counts[cluster] * n_vars);
-        for row in 0..prep.x.n_rows {
-            if prep.cell_cluster[row] as usize != cluster {
-                continue;
-            }
+        for row in (0..prep.x.n_rows).filter(|&row| is_cluster(row)) {
             let range = prep.x.indptr[row]..prep.x.indptr[row + 1];
             let (columns, values) = (&prep.x.indices[range.clone()], &prep.x.data[range]);
             let mut next = 0;
@@ -777,7 +828,6 @@ fn cluster_stats(prep: &Prep) -> (Vec<f32>, Vec<f32>) {
                 let value = if next < columns.len() && columns[next] as usize == gene {
                     let value = values[next];
                     next += 1;
-                    scaled.push(value * scale);
                     value
                 } else {
                     0.0
@@ -785,10 +835,29 @@ fn cluster_stats(prep: &Prep) -> (Vec<f32>, Vec<f32>) {
                 dense.push(value);
             }
         }
-        means[cluster] = sum_f32(&scaled);
         stds[cluster] = std_f32(&dense);
     }
     (means, stds)
+}
+
+/// `mat_mean` (`_liana_pipe.py:141`): `np.float32(get_x(adata).mean(dtype="float32"))`
+/// — scipy's sparse `f32` mean over the whole prepared matrix.
+fn mat_mean(prep: &Prep) -> f32 {
+    let scale = (1.0f64 / (prep.x.n_rows * prep.n_vars()) as f64) as f32;
+    sparse_mean(prep, scale, 0..prep.x.n_rows)
+}
+
+/// scipy's sparse scalar `mean(dtype=f32)`: every stored value of the given
+/// rows scaled to `f32` by `scale` — the cached `1 / (rows * cols)` of the
+/// block's shape — then numpy's pairwise sum, in row-major canonical order
+/// (`scipy/sparse/_base.py:1574`; `prep`'s rows are column-sorted).
+fn sparse_mean(prep: &Prep, scale: f32, rows: impl Iterator<Item = usize>) -> f32 {
+    let mut scaled = Vec::new();
+    for row in rows {
+        let range = prep.x.indptr[row]..prep.x.indptr[row + 1];
+        scaled.extend(prep.x.data[range].iter().map(|&value| value * scale));
+    }
+    sum_f32(&scaled)
 }
 
 /// `_gene_cdf` (`_liana_pipe.py:755-767`): `norm.cdf(gene_mean, loc=cluster_mean,
