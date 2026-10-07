@@ -1,0 +1,105 @@
+{
+  "liana_version": "2.0.0",
+  "liana_commit": "c59472ccc9de8360dbbf5016db75f8abde08dd3e",
+  "adata": "testdata/fixtures/synthetic.h5ad",
+  "adata_sha256": "029d7de8019bf50203394f22f0d70adfa1ef890f2a752040a1766d85037a27e5",
+  "groupby": "cell_type",
+  "toy_resource": "testdata/expected/synthetic__resource.csv",
+  "toy_resource_sha256": "fb6f5272b2e07b984355faad9dc184535de54019c253c6a343231b48740f0843",
+  "cases": {
+    "toy": {
+      "min_cells": 0,
+      "expr_prop": 0.05,
+      "labels": [
+        "A",
+        "B"
+      ],
+      "n_cells": 4205,
+      "n_exploded": 110,
+      "n_lr_rows": 440,
+      "resource": "toy",
+      "n_kept": 440,
+      "sha256_kept": "432ac85263146b022a21200443e13639396131d11485bf5955f97ed3f3ae4aa8"
+    },
+    "toy_cut": {
+      "min_cells": 0,
+      "expr_prop": 0.35,
+      "labels": [
+        "A",
+        "B"
+      ],
+      "n_cells": 4205,
+      "n_exploded": 110,
+      "n_lr_rows": 440,
+      "resource": "toy",
+      "n_kept": 168,
+      "sha256_kept": "86947727db2bec1f60aa5309217eb57e6f4f863e185a23b98b0819356750aac6"
+    },
+    "toy_min_cells": {
+      "min_cells": 2100,
+      "expr_prop": 0.05,
+      "labels": [
+        "B"
+      ],
+      "n_cells": 2117,
+      "n_exploded": 110,
+      "n_lr_rows": 110,
+      "resource": "toy",
+      "n_kept": 110,
+      "sha256_kept": "7b88c243d2377f9fe5aab5839eb16b62867dc6c882bc3296548114ed9de1a196"
+    },
+    "complex": {
+      "min_cells": 0,
+      "expr_prop": 0.05,
+      "labels": [
+        "A",
+        "B"
+      ],
+      "n_cells": 4205,
+      "n_exploded": 7,
+      "n_lr_rows": 28,
+      "resource_pairs": [
+        [
+          "ECM_ligA",
+          "protE_protF"
+        ],
+        [
+          "ligB_ligC",
+          "protE"
+        ],
+        [
+          "ECM",
+          "protF"
+        ],
+        [
+          "ligD",
+          "protX"
+        ],
+        [
+          "ligD_protZ",
+          "protF"
+        ],
+        [
+          "protZ_ligD",
+          "protF_protW"
+        ]
+      ],
+      "n_kept": 12,
+      "sha256_kept": "8eb3f35e818eed0dc5c28db859664c2d7af9fecb291cfa445c346050edf1cb31"
+    },
+    "empty": {
+      "min_cells": 0,
+      "expr_prop": 1.5,
+      "labels": [
+        "A",
+        "B"
+      ],
+      "n_cells": 4205,
+      "n_exploded": 110,
+      "n_lr_rows": 440,
+      "resource": "toy",
+      "raises": "ValueError",
+      "message": "No ligand-receptor pair passed `expr_prop=1.5`: the highest minimum subunit proportion is 1. Lower `expr_prop`. Note that `return_all_lrs=True` does not help here -- there is no score to fill the rest with."
+    }
+  }
+}

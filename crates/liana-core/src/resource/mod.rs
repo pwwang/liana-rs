@@ -2,12 +2,17 @@
 //!
 //! [`select`] reads the vendored `omni_resource.csv` the way liana's
 //! `select_resource` does; [`explode_complexes`] mirrors `_explode_complexes`
-//! (protein complexes are `_`-joined subunit symbols). See
+//! (protein complexes are `_`-joined subunit symbols); [`filter_lrs`] applies
+//! `expr_prop`/`min_cells` to an [`Adata`](crate::io::Adata). See
 //! `docs/resource-semantics.md`.
+
+mod filter;
 
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
+
+pub use filter::{FilterResult, KeptPair, filter_lrs, filter_resource};
 
 /// The pinned liana resource, vendored verbatim (`data/README.md`).
 const OMNI_RESOURCE: &str = include_str!("../../data/omni_resource.csv");
