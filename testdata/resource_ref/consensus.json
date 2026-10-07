@@ -198,6 +198,8 @@
       "PTCH1_SMO",
       "PTCH2_SMO",
       "TGFBR1_TGFBR2"
-    ]
+    ],
+    "n_exploded_pairs": 5776,
+    "sha256_exploded": "a0037dd6127501e5f5ec5463c1bc3569fbc9ebfc74d0af24710ccc0d4cf4f391"
   }
 }

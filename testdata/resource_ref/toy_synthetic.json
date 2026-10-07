@@ -1,0 +1,14 @@
+{
+  "liana_version": "2.0.0",
+  "liana_commit": "c59472ccc9de8360dbbf5016db75f8abde08dd3e",
+  "csv": "liana/resource/omni_resource.csv",
+  "csv_sha256": "65e46a428818c0600de66c1574c94ff2f5dc80859998321c03a956d330dd67fb",
+  "n_csv_rows": 35356,
+  "n_resources": 17,
+  "name": "synthetic__resource",
+  "file": "testdata/expected/synthetic__resource.csv",
+  "sha256_file": "fb6f5272b2e07b984355faad9dc184535de54019c253c6a343231b48740f0843",
+  "n_pairs": 110,
+  "n_complex_pairs": 0,
+  "sha256_pairs_ordered": "d42a2af615e4c5c48dbd4a38335d004afe381373fa3a7f10cb02b56be176b084"
+}
